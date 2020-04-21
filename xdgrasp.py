@@ -32,7 +32,7 @@ def xdgrasp(
         print("Coil Compressed kspace shape: {} ...".format(ksp.shape))
     coord = coord[..., :nReadouts, :]
     ksp = ksp[..., :nReadouts]
-    dcf = dcf[..., :nReadouts]
+    dcf = dcf[..., :nReadouts] ** 0.5
 
     print("Image Shape Estimate: {}".format(sp.estimate_shape(coord)))
     # nPhases, nEcalib, nCoils, nSpokes, nReadouts, _ = data.shape
@@ -60,25 +60,35 @@ def xdgrasp(
     mps = sp.to_device(mps)
     S = []
     for ii in range(nPhases):
-        for jj in range(nCoils):
-            S.append(sp.linop.Multiply(tshape, mps[jj]))
-    del mps
+        S.append(sp.linop.Multiply(tshape, mps))
+        # for jj in range(nCoils):
+        #     S.append(sp.linop.Multiply(tshape, mps[jj]))
+    # del mps
 
     L = np.zeros((nPhases,) + tshape, dtype=np.complex64)
-    Ones_t = xp.ones(tshape, dtype=xp.complex64)
+    img_ones = xp.ones(tshape, dtype=xp.complex64)
     print("Computing Preconditioner")
     timeI = time.time()
     for ii in trange(nPhases, desc="Motion Phases"):
-        # Generate DCF and NUFFT Combined Operator
-        WF = sp.linop.Multiply(
-            (nSpokes, nReadouts), sp.to_device(np.squeeze(dcf[ii]), device)
-        ) * sp.linop.NUFFT(tshape, coord=sp.to_device(np.squeeze(coord[ii]), device))
-        Lt = 0
+        coord_t = sp.to_device(coord[ii], device)
+        dcf_t = sp.to_device(dcf[ii], device)
+        img_t = 0
         for jj in range(nCoils):
-            idx = ii * nCoils + jj
-            WFS = WF * S[idx]
-            Lt += sp.to_device(WFS.H * WFS * Ones_t)
-        L[ii] = sp.to_device(Lt)
+            # idx = ii * nCoils + jj
+            mps_c = sp.to_device(mps[jj], device)
+            # plt.ImagePlot(mps_c)
+            # plt.ImagePlot(img_ones * mps_c)
+            img_tc = xp.squeeze(sp.nufft(img_ones * mps_c, coord_t))
+            # plt.ImagePlot(img_tc)
+            img_tc *= dcf_t ** 2
+            # plt.ImagePlot(img_tc)
+            img_tc = sp.nufft_adjoint(img_tc, coord_t, oshape=tshape)
+            # plt.ImagePlot(img_tc)
+            img_tc *= xp.conj(mps_c)
+            # plt.ImagePlot(img_tc)
+            img_t += img_tc
+            # plt.ImagePlot(img_t)
+        L[ii, ...] = sp.to_device(img_t)
     L = np.mean(np.abs(L))
     print(L)
     timeF = time.time()
@@ -94,58 +104,54 @@ def xdgrasp(
     img_0 = np.zeros_like(img)
     tau = 0.4
     sigma = 0.4
-    memory_size = 2 * 8 * np.prod(tshape) / (1024 ** 3)
-    if memory_size > 0.86:
-        print("DOING TV ON CPU!!")
-        tv_device = -1
-    else:
-        print("DOING TV ON GPU...")
-        tv_device = 0
+    # memory_size = 2 * 8 * np.prod(tshape) / (1024 ** 3)
+    # if memory_size > 0.86:
+    #     print("DOING TV ON CPU!!")
+    #     tv_device = -1
+    # else:
+    #     print("DOING TV ON GPU...")
+    #     tv_device = 0
+    tv_device = -1
     # Do Phase by Phase
-    for ii in trange(outer_iter, desc="Outer Iterations"):
+    pbarOuter = trange(outer_iter, leave=True)
+    for ii in pbarOuter:
         timeI = time.time()
-        # plt.ImagePlot(img_0)
-        for jj in trange(nPhases, desc="Motion Phases"):
+        pbarOuter.set_description("Processing Outer Iteration {}".format(ii))
+        # pbarMotion = trange(nPhases, desc="Motion Phases")
+        for jj in range(nPhases):
+            # pbarMotion.set_description("Processing Motion Phase {}".format(jj))
             img_p = sp.to_device(img[jj], device)
-            if jj > 0:
-                img_p2 = sp.to_device(img[jj - 1], device)
-            else:
-                # img_p2 = sp.to_device(img[jj + 1], device)
-                img_p2 = xp.zeros(img_p.shape, dtype=xp.complex64)
-            # Generate DCF and NUFFT Combined Operator
-            WF = sp.linop.Multiply(
-                (nSpokes, nReadouts), sp.to_device(np.squeeze(dcf[jj]), device)
-            ) * sp.linop.NUFFT(tshape, coord=sp.to_device(np.squeeze(coord[jj]), device))
+            coord_t = xp.squeeze(sp.to_device(coord[jj], device))
+            dcf_t = xp.squeeze(sp.to_device(dcf[jj], device))
             img_t = 0
+            # Do coil by coil
             for kk in range(nCoils):
-                idx = jj * nCoils + kk
-                WFS = WF * S[idx]
+                # idx = jj * nCoils + kk
+                # WFS = WF * S[idx]
                 # kspace to memory
+                mps_c = xp.squeeze(sp.to_device(mps[kk], device))
                 ksp_p = sp.to_device(ksp[jj, kk], device)
                 Yt = sp.to_device(Y[jj, kk], device)
                 # update Yt
-                Yt += sigma * (1 / L * WFS * img_p - ksp_p)
+                Yt += sigma * (1 / L * dcf_t * xp.squeeze(sp.nufft(img_p * mps_c, coord_t)) - ksp_p)
                 Yt /= 1 + sigma
                 # Accumulate over coils
-                img_p -= tau * WFS.H(Yt)
+                img_p -= tau * xp.conj(mps_c) * sp.nufft_adjoint(dcf_t * Yt, coord_t, oshape=tshape)
                 Y[jj, kk] = sp.to_device(Yt.copy())
                 del Yt, ksp_p
                 img_t += img_p
                 # plt.ImagePlot(img_p)
-            img_p = xp.stack((img_t.copy(), img_p2))
-            del img_t, WF, WFS
-            img_p = linops.TVt_prox(img_p, lambda_tv, iter_max=inner_iter, device=tv_device)
-            # plt.ImagePlot(img_p)
-            img[jj] = sp.to_device(img_p[0])
+            # img_p = xp.stack((img_t.copy(), img_p2))
+            img[jj] = sp.to_device(img_t)
+        del img_p, img_t, coord_t, dcf_t  # Try to clear GPU memory.
+        img = sp.to_device(linops.TVt_prox(img, lambda_tv, iter_max=inner_iter, device=tv_device))
+        # plt.ImagePlot(img_p)
+        # img[jj] = sp.to_device(img_p[0])
         timeF = time.time()
-        print(
-            "outer iter:{}, res:{}, time:{} seconds".format(
-                ii, np.linalg.norm(img - img_0) / np.linalg.norm(img), timeF - timeI
-            )
+        pbarOuter.set_postfix(
+            loss=np.linalg.norm(img - img_0) / np.linalg.norm(img), time=timeF - timeI
         )
-        img_0 = img.copy()
-
-        # print("outer iter:{}, time:{} seconds".format(ii, timeF - timeI))
+        img_0 = img
     print("done...")
     return img
 
@@ -158,7 +164,7 @@ if __name__ == "__main__":
     parser.add_argument("dcf_file", type=str, help="dcf file.")
     parser.add_argument("img_file", type=str, help="img out file.")
     parser.add_argument("--res_scale", type=float, default=1.0, help="scale of resolution 0-1")
-    parser.add_argument("--lambda_tv", type=float, default=5e-2, help="TV regularization, 0.05")
+    parser.add_argument("--lambda_tv", type=float, default=2e-2, help="TV regularization, 0.05")
     parser.add_argument("--inner_iter", type=int, default=10, help="Num of inner Iterations.")
     parser.add_argument("--outer_iter", type=int, default=20, help="Num of outer Iterations.")
     parser.add_argument("--device", type=int, default=0, help="Computing device.")
