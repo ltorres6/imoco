@@ -4,7 +4,8 @@ import sigpy.mri as mr
 import h5py
 import numpy as np
 import argparse
-import sigpy.plot as plt
+
+# import sigpy.plot as plt
 
 parser = argparse.ArgumentParser(
     description="Converts UWUTE h5 files to npy arrays in natural time ordering."
@@ -14,7 +15,7 @@ parser.add_argument("ksp_file", type=str)
 parser.add_argument("coord_file", type=str)
 parser.add_argument("dcf_file", type=str)
 parser.add_argument("resp_file", type=str)
-parser.add_argument("dsfSpokes", type=float)
+parser.add_argument("--dsfSpokes", type=float, default=1.0)
 args = parser.parse_args()
 
 

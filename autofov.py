@@ -2,10 +2,15 @@ import argparse
 import numpy as np
 import sigpy as sp
 import logging
-import sigpy.plot as plt
+from normalize import normalize
+# from scipy.misc import imsave
+from PIL import Image
+
+# import sigpy.plot as plt
+# import imageio
 
 
-def autofov(ksp, coord, dcf, num_ro, device, thresh, radial):
+def autofov(ksp, coord, dcf, diagPath, num_ro, device, thresh, radial):
     """Automatic estimation of FOV.
 
     FOV is estimated by thresholding a low resolution gridded image.
@@ -50,7 +55,12 @@ def autofov(ksp, coord, dcf, num_ro, device, thresh, radial):
         # imgc2 = sp.convolve(imgc2, filt)
         imgc2 = sp.ifft(sp.fft(sp.to_device(imgc2, device), norm=None) * filt, norm=None)
         imgc2 /= imgc2.max()
-        plt.ImagePlot(imgc2)
+        # plt.ImagePlot(imgc2)
+        im = 
+        im = Image.fromarray(sp.to_device(xp.abs(imgc2[:, imgc2.shape[1] // 2, :])))
+        im = im.convert("L")
+        im.save(diagPath + "/diag_lowResRecon.jpg")
+
         if imgc2.ndim == 3:
             imgc2_cor = imgc2[:, imgc2.shape[1] // 2, :]
             thresh *= imgc2_cor.max()
@@ -58,7 +68,9 @@ def autofov(ksp, coord, dcf, num_ro, device, thresh, radial):
             thresh *= imgc2.max()
         boxc = imgc2 > thresh
         boxc = sp.to_device(boxc)
-        plt.ImagePlot(boxc)
+        im = Image.fromarray(sp.to_device(boxc[:, boxc.shape[1] // 2, :]))
+        im = im.convert("L")
+        im.save(diagPath + "/diag_fovMask.jpg")
         boxc_idx = np.nonzero(boxc)
         boxc_shape = np.array(
             [int(np.abs(boxc_idx[i] - imgc2_center[i]).max()) * 2 for i in range(imgc2.ndim)]
@@ -76,7 +88,14 @@ def autofov(ksp, coord, dcf, num_ro, device, thresh, radial):
         imgc_shape = sp.estimate_shape(coordc)
         imgc = sp.nufft_adjoint(sp.to_device(dcfc * kspc, device), coordc, [num_coils] + imgc_shape)
         imgc = xp.sum(xp.abs(imgc) ** 2, axis=0) ** 0.5
-        plt.ImagePlot(imgc)
+        # plt.ImagePlot(imgc)
+        # imageio.imwrite(
+        #     diagPath + "/diag_effectiveFOVImg.jpg", sp.to_device(imgc[:, imgc.shape[1] // 2, :])
+        # )
+        im = Image.fromarray(sp.to_device(xp.abs(imgc[:, imgc.shape[1] // 2, :])))
+        im = im.convert("L")
+        im.save(diagPath + "/diag_effectiveFOVImg.jpg")
+
         # --------------------
 
 
@@ -92,6 +111,8 @@ if __name__ == "__main__":
     parser.add_argument("ksp_file", type=str)
     parser.add_argument("coord_file", type=str)
     parser.add_argument("dcf_file", type=str)
+    parser.add_argument("diagnosticsDir", type=str)
+
     parser.add_argument("--radial", action="store_true")
 
     args = parser.parse_args()
@@ -106,6 +127,7 @@ if __name__ == "__main__":
         ksp,
         coord,
         dcf,
+        diagPath=args.diagnosticsDir,
         num_ro=args.num_ro,
         device=args.device,
         thresh=args.thresh,

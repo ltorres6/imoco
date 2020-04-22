@@ -18,3 +18,5 @@ export resp=$1/resp.npy
 export mrimg=$1/mrimg.npy
 export sgw=$1/sgw.npy
 export sgimg=$1/sgimg.h5
+echo "Completed Setup Successfully"
+echo $1
