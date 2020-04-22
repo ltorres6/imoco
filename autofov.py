@@ -3,6 +3,7 @@ import numpy as np
 import sigpy as sp
 import logging
 from normalize import normalize
+
 # from scipy.misc import imsave
 from PIL import Image
 
@@ -56,8 +57,8 @@ def autofov(ksp, coord, dcf, diagPath, num_ro, device, thresh, radial):
         imgc2 = sp.ifft(sp.fft(sp.to_device(imgc2, device), norm=None) * filt, norm=None)
         imgc2 /= imgc2.max()
         # plt.ImagePlot(imgc2)
-        im = 
-        im = Image.fromarray(sp.to_device(xp.abs(imgc2[:, imgc2.shape[1] // 2, :])))
+        im = normalize(sp.to_device(xp.abs(imgc2[:, imgc2.shape[1] // 2, :])), 0, 255)
+        im = Image.fromarray(im)
         im = im.convert("L")
         im.save(diagPath + "/diag_lowResRecon.jpg")
 
@@ -68,7 +69,8 @@ def autofov(ksp, coord, dcf, diagPath, num_ro, device, thresh, radial):
             thresh *= imgc2.max()
         boxc = imgc2 > thresh
         boxc = sp.to_device(boxc)
-        im = Image.fromarray(sp.to_device(boxc[:, boxc.shape[1] // 2, :]))
+        im = sp.to_device(boxc[:, boxc.shape[1] // 2, :])
+        im = Image.fromarray(im)
         im = im.convert("L")
         im.save(diagPath + "/diag_fovMask.jpg")
         boxc_idx = np.nonzero(boxc)
@@ -89,10 +91,8 @@ def autofov(ksp, coord, dcf, diagPath, num_ro, device, thresh, radial):
         imgc = sp.nufft_adjoint(sp.to_device(dcfc * kspc, device), coordc, [num_coils] + imgc_shape)
         imgc = xp.sum(xp.abs(imgc) ** 2, axis=0) ** 0.5
         # plt.ImagePlot(imgc)
-        # imageio.imwrite(
-        #     diagPath + "/diag_effectiveFOVImg.jpg", sp.to_device(imgc[:, imgc.shape[1] // 2, :])
-        # )
-        im = Image.fromarray(sp.to_device(xp.abs(imgc[:, imgc.shape[1] // 2, :])))
+        im = normalize(sp.to_device(xp.abs(imgc[:, imgc.shape[1] // 2, :])), 0, 255)
+        im = Image.fromarray(im)
         im = im.convert("L")
         im.save(diagPath + "/diag_effectiveFOVImg.jpg")
 
