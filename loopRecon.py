@@ -1,5 +1,11 @@
 import os
-import subprocess
+
+# import subprocess
+from convertUTE import convertUTE
+from autofov import autofov
+from binMotionStates import binMotionStates
+from xdgrasp import xdgrasp
+import cfl
 
 # loop_moco.py
 codeDir = "/export/home/ltorres/projects/xdgrasp"
@@ -7,7 +13,8 @@ rootDir = "/scratch/scratch_cnxx/ltorres"
 subjectList = os.listdir(rootDir)
 subjectList.remove("ipf")
 subjectList.sort()
-# print(*subjectList, sep=", ")
+# set device
+device = 2
 try:
     for ii in subjectList:
         subject = ii
@@ -34,80 +41,23 @@ try:
             mps_path = subjectDir + "/mps.npy"
             resp_path = subjectDir + "/resp.npy"
             mrimg_path = subjectDir + "/mrimg"  # no extention for cfl file writing
-
+            diagnostics_path = subjectDir
             # 1) Convert MRI_Raw.h5 to cfl and read resp waveform.
-            command = (
-                "python "
-                + os.path.join(codeDir, "convert_uwute.py")
-                + " "
-                + h5_path
-                + " "
-                + ksp_path
-                + " "
-                + coord_path
-                + " "
-                + dcf_path
-                + " "
-                + resp_path
-            )
+
             print("Running File Conversion...")
-            subprocess.call([command], shell=True)
+            ksp, coord, dcf, resp = convertUTE(h5_path)
 
             # 2) AutoFOV to reduce matrix size
-            command = (
-                "python "
-                + os.path.join(codeDir, "autofov.py")
-                + " "
-                + ksp_path
-                + " "
-                + coord_path
-                + " "
-                + dcf_path
-                + " "
-                + subjectDir  # Diagnostics Directory
-                + " --thresh 0.4"
-                + " --device 3"
-            )
-
-            print("Running Autofov...")
-            subprocess.call([command], shell=True)
+            print("Running AutoFOV...")
+            coord = autofov(ksp, coord, dcf, diagnostics_path, device=device)
 
             # 3) Bin Motion States
-            command = (
-                "python "
-                + os.path.join(codeDir, "binMotionStates.py")
-                + " "
-                + ksp_path
-                + " "
-                + coord_path
-                + " "
-                + dcf_path
-                + " "
-                + resp_path
-                + " "
-                + kspB_path
-                + " "
-                + coordB_path
-                + " "
-                + dcfB_path
-            )
             print("Running BinMotionStates...")
-            subprocess.call([command], shell=True)
-
+            nBins = 6
+            ksp, coord, dcf = binMotionStates(ksp, coord, dcf, resp, nBins)
             # 4) xdgrasp recon
-            command = (
-                "python "
-                + os.path.join(codeDir, "xdgrasp.py")
-                + " "
-                + kspB_path
-                + " "
-                + coordB_path
-                + " "
-                + dcfB_path
-                + " "
-                + mrimg_path
-            )
             print("Running Reconstruction...")
-            subprocess.call([command], shell=True)
+            img = xdgrasp(ksp, coord, dcf, res_scale=0.5, lambda_tv=0.05, device=0)
+            cfl.write_cfl(mrimg_path, img)
 except KeyboardInterrupt:
     print("interrupted!")

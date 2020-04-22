@@ -11,7 +11,7 @@ import sigpy.plot as plt
 
 
 def xdgrasp(
-    ksp, coord, dcf, res_scale, lambda_tv, inner_iter, outer_iter, device,
+    ksp, coord, dcf, res_scale=1.0, lambda_tv=0.05, inner_iter=10, outer_iter=20, device=0,
 ):
     xp = sp.Device(device).xp
     if device == 0:

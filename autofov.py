@@ -12,7 +12,7 @@ from PIL import Image
 # import imageio
 
 
-def autofov(ksp, coord, dcf, diagPath, num_ro, device, thresh, radial):
+def autofov(ksp, coord, dcf, diagPath, num_ro=100, device=-1, thresh=0.4, radial=False):
     """Automatic estimation of FOV.
 
     FOV is estimated by thresholding a low resolution gridded image.
@@ -33,7 +33,7 @@ def autofov(ksp, coord, dcf, diagPath, num_ro, device, thresh, radial):
     device = sp.Device(device)
     xp = device.xp
     with device:
-        if radial:
+        if radial == True:
             ro_center = ksp.shape[2] // 2
             ro_range = slice(ro_center - num_ro // 2, ro_center + num_ro // 2, 1)
         else:
@@ -98,7 +98,7 @@ def autofov(ksp, coord, dcf, diagPath, num_ro, device, thresh, radial):
         im.save(diagPath + "/diag_effectiveFOVImg.jpg")
 
         # --------------------
-        # return coord
+        return coord
 
 
 if __name__ == "__main__":
@@ -125,7 +125,7 @@ if __name__ == "__main__":
     print("Kspace Shape Original: {}".format(ksp.shape))
     print("Input Image Shape: {}".format(sp.estimate_shape(coord)))
 
-    autofov(
+    coordOut = autofov(
         ksp,
         coord,
         dcf,
@@ -136,9 +136,9 @@ if __name__ == "__main__":
         radial=args.radial,
     )
 
-    logging.info("Output Image shape: {}".format(sp.estimate_shape(coord)))
+    logging.info("Output Image shape: {}".format(sp.estimate_shape(coordOut)))
 
     logging.info("Saving data.")
     if os.path.isfile(args.coord_file):
         os.remove(args.coord_file)
-    np.save(args.coord_file, coord)
+    np.save(args.coord_file, coordOut)
