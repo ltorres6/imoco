@@ -4,6 +4,7 @@ import sigpy.mri as mr
 import h5py
 import numpy as np
 import argparse
+import os
 
 # import sigpy.plot as plt
 
@@ -78,6 +79,11 @@ with h5py.File(args.h5_file, "r") as hf:
     coord = coord[:nSpokes, :, :]
     dcf = dcf[:nSpokes, :]
     logging.info("Saving data.")
+    if os.path.isfile(args.ksp_file):
+        os.remove(args.ksp_file)
+        os.remove(args.coord_file)
+        os.remove(args.dcf_file)
+        os.remove(args.resp_file)
     np.save(args.ksp_file, ksp)
     np.save(args.coord_file, coord)
     np.save(args.dcf_file, dcf)

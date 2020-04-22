@@ -34,7 +34,8 @@ try:
             mps_path = subjectDir + "/mps.npy"
             resp_path = subjectDir + "/resp.npy"
             mrimg_path = subjectDir + "/mrimg"  # no extention for cfl file writing
-            # Convert MRI_Raw.h5 to cfl and read resp waveform.
+
+            # 1) Convert MRI_Raw.h5 to cfl and read resp waveform.
             command = (
                 "python "
                 + os.path.join(codeDir, "convert_uwute.py")
@@ -49,10 +50,10 @@ try:
                 + " "
                 + resp_path
             )
-            # os.system(command)
             print("Running File Conversion...")
-            # subprocess.call([command], shell=True)
-            # AutoFOV to reduce matrix size
+            subprocess.call([command], shell=True)
+
+            # 2) AutoFOV to reduce matrix size
             command = (
                 "python "
                 + os.path.join(codeDir, "autofov.py")
@@ -67,8 +68,46 @@ try:
                 + " --thresh 0.4"
                 + " --device 3"
             )
-            # os.system(command)
+
             print("Running Autofov...")
+            subprocess.call([command], shell=True)
+
+            # 3) Bin Motion States
+            command = (
+                "python "
+                + os.path.join(codeDir, "binMotionStates.py")
+                + " "
+                + ksp_path
+                + " "
+                + coord_path
+                + " "
+                + dcf_path
+                + " "
+                + resp_path
+                + " "
+                + kspB_path
+                + " "
+                + coordB_path
+                + " "
+                + dcfB_path
+            )
+            print("Running BinMotionStates...")
+            subprocess.call([command], shell=True)
+
+            # 4) xdgrasp recon
+            command = (
+                "python "
+                + os.path.join(codeDir, "xdgrasp.py")
+                + " "
+                + kspB_path
+                + " "
+                + coordB_path
+                + " "
+                + dcfB_path
+                + " "
+                + mrimg_path
+            )
+            print("Running Reconstruction...")
             subprocess.call([command], shell=True)
 except KeyboardInterrupt:
     print("interrupted!")

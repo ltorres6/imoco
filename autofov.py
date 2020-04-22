@@ -3,6 +3,7 @@ import numpy as np
 import sigpy as sp
 import logging
 from normalize import normalize
+import os
 
 # from scipy.misc import imsave
 from PIL import Image
@@ -97,6 +98,7 @@ def autofov(ksp, coord, dcf, diagPath, num_ro, device, thresh, radial):
         im.save(diagPath + "/diag_effectiveFOVImg.jpg")
 
         # --------------------
+        # return coord
 
 
 if __name__ == "__main__":
@@ -137,4 +139,6 @@ if __name__ == "__main__":
     logging.info("Output Image shape: {}".format(sp.estimate_shape(coord)))
 
     logging.info("Saving data.")
+    if os.path.isfile(args.coord_file):
+        os.remove(args.coord_file)
     np.save(args.coord_file, coord)

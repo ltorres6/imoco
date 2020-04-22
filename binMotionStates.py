@@ -1,5 +1,6 @@
 import argparse
 import numpy as np
+import os
 
 
 def binMotionStates(ksp, coord, dcf, resp, n):
@@ -66,6 +67,11 @@ if __name__ == "__main__":
     print("kspace shape: {}".format(kspB.shape))
     print("trajectory shape: {}".format(coordB.shape))
     print("dcf shape: {}".format(dcfB.shape))
+
+    if os.path.isfile(args.ksp_ofile):
+        os.remove(args.ksp_ofile)
+        os.remove(args.coord_ofile)
+        os.remove(args.dcf_ofile)
     np.save(args.ksp_ofile, kspB)
     np.save(args.coord_ofile, coordB)
     np.save(args.dcf_ofile, dcfB)
