@@ -13,22 +13,25 @@ import sigpy.plot as plt
 def xdgrasp(
     ksp, coord, dcf, res_scale=1.0, lambda_tv=0.05, inner_iter=10, outer_iter=20, device=0,
 ):
+    sp.Device(device).use()
     xp = sp.Device(device).xp
-    if device == 0:
+    if device >= 0:
         print("Using GPU...")
     else:
         print("Using CPU...")
 
-    nf_arr = np.sqrt(np.sum(coord[0, 0, :, :] ** 2, axis=1))
-    nReadouts = np.sum(nf_arr < np.max(nf_arr) * res_scale)
     print("Kspace Shape: {}...".format(ksp.shape))
     print("trajectory Shape: {}...".format(coord.shape))
     print("DCF Shape: {}....".format(dcf.shape))
 
+    nf_arr = np.sqrt(np.sum(coord[0, 0, :, :] ** 2, axis=1))
+    nReadouts = np.sum(nf_arr < np.max(nf_arr) * res_scale)
+    del nf_arr
+
     # Coil Compression
-    if ksp.shape[1] > 6:
+    if ksp.shape[1] > 8:
         print("Running Coil Compression...")
-        ksp = pcaCoilCompression(kdata=ksp, axis=1, target_channels=6)
+        ksp = pcaCoilCompression(kdata=ksp, axis=1, target_channels=8)
         print("Coil Compressed kspace shape: {} ...".format(ksp.shape))
     coord = coord[..., :nReadouts, :]
     ksp = ksp[..., :nReadouts]
@@ -37,11 +40,12 @@ def xdgrasp(
     print("Image Shape Estimate: {}".format(sp.estimate_shape(coord)))
     # nPhases, nEcalib, nCoils, nSpokes, nReadouts, _ = data.shape
     nPhases, nCoils, nSpokes, nReadouts = ksp.shape
-    tshape = (
-        np.int(np.max(coord[..., 0]) - np.min(coord[..., 0])),
-        np.int(np.max(coord[..., 1]) - np.min(coord[..., 1])),
-        np.int(np.max(coord[..., 2]) - np.min(coord[..., 2])),
-    )
+    tshape = sp.estimate_shape(coord)
+    # tshape = (
+    #     np.int(np.max(coord[..., 0]) - np.min(coord[..., 0])),
+    #     np.int(np.max(coord[..., 1]) - np.min(coord[..., 1])),
+    #     np.int(np.max(coord[..., 2]) - np.min(coord[..., 2])),
+    # )
 
     # calibration
     print("Running calibration...")
@@ -58,11 +62,11 @@ def xdgrasp(
         max_inner_iter=10,
     ).run()
     mps = sp.to_device(mps)
-    S = []
-    for ii in range(nPhases):
-        S.append(sp.linop.Multiply(tshape, mps))
-        # for jj in range(nCoils):
-        #     S.append(sp.linop.Multiply(tshape, mps[jj]))
+    # S = []
+    # for ii in range(nPhases):
+    #     S.append(sp.linop.Multiply(tshape, mps))
+    # for jj in range(nCoils):
+    #     S.append(sp.linop.Multiply(tshape, mps[jj]))
     # del mps
 
     L = np.zeros((nPhases,) + tshape, dtype=np.complex64)
@@ -153,7 +157,7 @@ def xdgrasp(
         )
         img_0 = img
     print("done...")
-    return img
+    return sp.to_device(img)
 
 
 if __name__ == "__main__":

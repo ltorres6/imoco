@@ -1,6 +1,8 @@
 import argparse
 import numpy as np
 import sigpy as sp
+from scipy import ndimage
+from skimage import measure
 import logging
 from normalize import normalize
 import os
@@ -10,6 +12,13 @@ from PIL import Image
 
 # import sigpy.plot as plt
 # import imageio
+
+
+def getLargestCC(mask):
+    labels = measure.label(mask)
+    assert labels.max() != 0  # assume at least 1 CC
+    largestCC = labels == np.argmax(np.bincount(labels.flat)[1:]) + 1
+    return largestCC
 
 
 def autofov(ksp, coord, dcf, diagPath, num_ro=100, device=-1, thresh=0.4, radial=False):
@@ -33,11 +42,12 @@ def autofov(ksp, coord, dcf, diagPath, num_ro=100, device=-1, thresh=0.4, radial
     device = sp.Device(device)
     xp = device.xp
     with device:
-        if radial == True:
+        if radial is True:
             ro_center = ksp.shape[2] // 2
             ro_range = slice(ro_center - num_ro // 2, ro_center + num_ro // 2, 1)
         else:
             ro_range = slice(0, num_ro, 1)
+        logging.info("Input Shape: {}".format(sp.estimate_shape(coord)))
 
         kspc = ksp[:, :, ro_range]
         coordc = coord[:, ro_range, :]
@@ -52,35 +62,57 @@ def autofov(ksp, coord, dcf, diagPath, num_ro=100, device=-1, thresh=0.4, radial
             sp.to_device(dcfc * kspc, device), coordc2, [num_coils] + imgc2_shape
         )
         imgc2 = xp.sum(xp.abs(imgc2) ** 2, axis=0) ** 0.5
-        filt = sp.to_device(sp.hanning((16, 16, 16)), device)
-        filt = sp.resize(filt, imgc2.shape)
+        imgc2 = sp.to_device(imgc2)
+        # Filter image?-----------------------
+        # filt = sp.to_device(sp.hanning((16, 16, 16)), device)
+        # filt = sp.resize(filt, imgc2.shape)
         # imgc2 = sp.convolve(imgc2, filt)
-        imgc2 = sp.ifft(sp.fft(sp.to_device(imgc2, device), norm=None) * filt, norm=None)
+        # imgc2 = sp.ifft(sp.fft(sp.to_device(imgc2, device), norm=None) * filt, norm=None)
+        imgc2 = ndimage.median_filter(imgc2, (3, 3, 3))
+        # -----------------------------------
         imgc2 /= imgc2.max()
         # plt.ImagePlot(imgc2)
-        im = normalize(sp.to_device(xp.abs(imgc2[:, imgc2.shape[1] // 2, :])), 0, 255)
-        im = Image.fromarray(im)
-        im = im.convert("L")
-        im.save(diagPath + "/diag_lowResRecon.jpg")
+        imc = normalize(imgc2[:, imgc2.shape[1] // 2, :], 0, 255)
+        imc = Image.fromarray(imc)
+        imc = imc.convert("L")
+        imc.save(diagPath + "/d_lowResCoronal.jpg")
 
-        if imgc2.ndim == 3:
-            imgc2_cor = imgc2[:, imgc2.shape[1] // 2, :]
-            thresh *= imgc2_cor.max()
-        else:
-            thresh *= imgc2.max()
+        ims = normalize(imgc2[:, :, imgc2.shape[2] // 2], 0, 255)
+        ims = Image.fromarray(ims)
+        ims = ims.convert("L")
+        ims.save(diagPath + "/d_lowResSaggital.jpg")
+
+        ima = normalize(imgc2[imgc2.shape[0] // 2, :, :], 0, 255)
+        ima = Image.fromarray(ima)
+        ima = ima.convert("L")
+        ima.save(diagPath + "/d_lowResAxial.jpg")
+
+        # if imgc2.ndim == 3:
+        #     imgc2_cor = imgc2[:, imgc2.shape[1] // 2, :]
+        #     thresh *= imgc2_cor.max()
+        # else:
+        thresh *= imgc2.max()
         boxc = imgc2 > thresh
-        boxc = sp.to_device(boxc)
-        im = sp.to_device(boxc[:, boxc.shape[1] // 2, :])
-        im = Image.fromarray(im)
-        im = im.convert("L")
-        im.save(diagPath + "/diag_fovMask.jpg")
+        boxc = getLargestCC(boxc)
+        imc = boxc[:, boxc.shape[1] // 2, :]
+        imc = Image.fromarray(imc)
+        imc = imc.convert("L")
+        imc.save(diagPath + "/d_maskCoronal.jpg")
+
+        ims = boxc[:, :, boxc.shape[2] // 2]
+        ims = Image.fromarray(ims)
+        ims = ims.convert("L")
+        ims.save(diagPath + "/d_maskSaggital.jpg")
+
+        ima = boxc[boxc.shape[0] // 2, :, :]
+        ima = Image.fromarray(ima)
+        ima = ima.convert("L")
+        ima.save(diagPath + "/d_maskAxial.jpg")
         boxc_idx = np.nonzero(boxc)
         boxc_shape = np.array(
             [int(np.abs(boxc_idx[i] - imgc2_center[i]).max()) * 2 for i in range(imgc2.ndim)]
         )
         img_scale = boxc_shape / imgc_shape
-        print(img_scale)
-        print(imgc2_shape)
         if radial:
             img_scale *= 2
         coord *= img_scale
@@ -92,10 +124,24 @@ def autofov(ksp, coord, dcf, diagPath, num_ro=100, device=-1, thresh=0.4, radial
         imgc = sp.nufft_adjoint(sp.to_device(dcfc * kspc, device), coordc, [num_coils] + imgc_shape)
         imgc = xp.sum(xp.abs(imgc) ** 2, axis=0) ** 0.5
         # plt.ImagePlot(imgc)
-        im = normalize(sp.to_device(xp.abs(imgc[:, imgc.shape[1] // 2, :])), 0, 255)
-        im = Image.fromarray(im)
-        im = im.convert("L")
-        im.save(diagPath + "/diag_effectiveFOVImg.jpg")
+        imgc = sp.to_device(xp.abs(imgc))
+        imc = normalize(imgc[:, imgc.shape[1] // 2, :], 0, 255)
+        imc = Image.fromarray(imc)
+        imc = imc.convert("L")
+        imc.save(diagPath + "/d_effectiveFOVCoronal.jpg")
+
+        ims = normalize(imgc[:, :, imgc.shape[2] // 2], 0, 255)
+        ims = Image.fromarray(ims)
+        ims = ims.convert("L")
+        ims.save(diagPath + "/d_effectiveFOVSaggital.jpg")
+
+        ima = normalize(imgc[imgc.shape[0] // 2, :, :], 0, 255)
+        ima = Image.fromarray(ima)
+        ima = ima.convert("L")
+        ima.save(diagPath + "/d_effectiveFOVAxial.jpg")
+        logging.info("Output Shape: {}".format(sp.estimate_shape(coord)))
+        logging.info("Scaling Factors: {}".format(img_scale))
+        np.save(diagPath + "/fovScaleFactors.npy", img_scale)
 
         # --------------------
         return coord

@@ -4,9 +4,10 @@ import h5py
 import numpy as np
 import argparse
 import os
+from coilCompression import pcaCoilCompression
 
 
-def convertUTE(h5_file, dsfSpokes=1.0):
+def convertUTE(h5_file, nCoils=8, dsfSpokes=1.0):
 
     with h5py.File(h5_file, "r") as hf:
 
@@ -26,13 +27,13 @@ def convertUTE(h5_file, dsfSpokes=1.0):
 
         coord = []
         for i in ["Z", "Y", "X"]:
-            logging.info(f"Loading {i} coord.")
+            logging.info(f"Loading {i} coords.")
 
             coord.append(hf["Kdata"][f"K{i}_E0"][0][order])
 
         coord = np.stack(coord, axis=-1)
 
-        logging.info("Loading dcf")
+        logging.info("Loading density compensation function")
         dcf = hf["Kdata"]["KW_E0"][0][order]
 
         num_coils = 0
@@ -44,30 +45,45 @@ def convertUTE(h5_file, dsfSpokes=1.0):
         for c in range(num_coils):
             logging.info(f"Loading kspace, coil {c + 1} / {num_coils}.")
 
-            k = hf["Kdata"][f"KData_E0_C{c}"]
-            ksp.append(k["real"][0][order] + 1j * k["imag"][0][order])
+            # k = hf["Kdata"][f"KData_E0_C{c}"]
+            ksp.append(
+                hf["Kdata"][f"KData_E0_C{c}"]["real"][0][order]
+                + 1j * hf["Kdata"][f"KData_E0_C{c}"]["imag"][0][order]
+            )
+        logging.info(f"Stacking as np array...")
         ksp = np.stack(ksp, axis=0)
+        if num_coils <= nCoils:
+            try:
+                noise = hf["Kdata"]["Noise"]["real"] + 1j * hf["Kdata"]["Noise"]["imag"]
+                logging.info("Whitening ksp.")
+                cov = mr.util.get_cov(noise)
+                ksp = mr.util.whiten(ksp, cov)
+            except (MemoryError, Exception):
+                logging.info("No noise data exists. Scaling by max value.")
+                ksp /= np.abs(ksp).max()
+        else:
+            try:
+                logging.info(
+                    "Too many channels for whitening. Compressing to {} channels.".format(nCoils)
+                )
+                ksp = pcaCoilCompression(kdata=ksp, axis=0, target_channels=nCoils)
+                noise = hf["Kdata"]["Noise"]["real"] + 1j * hf["Kdata"]["Noise"]["imag"]
+                noise = pcaCoilCompression(kdata=noise, axis=0, target_channels=nCoils)
+                logging.info("Whitening ksp.")
+                cov = mr.util.get_cov(noise)
+                ksp = mr.util.whiten(ksp, cov)
+            except (MemoryError, Exception):
+                logging.info("No noise data exists. Scaling by max value.")
+                ksp /= np.abs(ksp).max()
 
-        try:
-            noise = hf["Kdata"]["Noise"]["real"] + 1j * hf["Kdata"]["Noise"]["imag"]
-            logging.info("Whitening ksp.")
-            cov = mr.util.get_cov(noise)
-            ksp = mr.util.whiten(ksp, cov)
-        except Exception:
-            logging.info("Whitening Failed or no noise data exists.")
-            ksp /= np.abs(ksp).max()
-            pass
+    totalSpokes = ksp.shape[1]
+    nSpokes = int(totalSpokes // dsfSpokes)
+    ksp = ksp[:, :nSpokes, :]
+    coord = coord[:nSpokes, :, :]
+    dcf = dcf[:nSpokes, :]
+    logging.info(f"Total Number of Spokes: {totalSpokes}, Requested Number of Spokes: {nSpokes}")
 
-        totalSpokes = ksp.shape[1]
-        nSpokes = int(totalSpokes // dsfSpokes)
-        ksp = ksp[:, :nSpokes, :]
-        coord = coord[:nSpokes, :, :]
-        dcf = dcf[:nSpokes, :]
-        logging.info(
-            f"Total Number of Spokes: {totalSpokes}, Requested Number of Spokes: {nSpokes}"
-        )
-
-        return ksp, coord, dcf, resp
+    return ksp, coord, dcf, resp
 
 
 if __name__ == "__main__":

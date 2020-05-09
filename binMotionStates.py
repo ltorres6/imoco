@@ -1,6 +1,7 @@
 import argparse
 import numpy as np
 import os
+import logging
 
 
 def binMotionStates(ksp, coord, dcf, resp, n):
@@ -25,10 +26,13 @@ def binMotionStates(ksp, coord, dcf, resp, n):
     while nSpokes % n is not 0:
         count += 1
         nSpokes -= 1
-    ksp = ksp[:, :-count]
-    coord = coord[:-count]
-    dcf = dcf[:-count]
-    resp = resp[:-count]
+    logging.info("Count is {}".format(count))
+    logging.info("nSpokes is {}".format(nSpokes))
+
+    ksp = ksp[:, :nSpokes]
+    coord = coord[:nSpokes]
+    dcf = dcf[:nSpokes]
+    resp = resp[:nSpokes]
     nSpokesB = int(nSpokes // n)
     respOrder = np.argsort(resp)
     kspB = []
