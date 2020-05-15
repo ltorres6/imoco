@@ -40,7 +40,7 @@ def xdgrasp(
     print("Image Shape Estimate: {}".format(sp.estimate_shape(coord)))
     # nPhases, nEcalib, nCoils, nSpokes, nReadouts, _ = data.shape
     nPhases, nCoils, nSpokes, nReadouts = ksp.shape
-    tshape = sp.estimate_shape(coord)
+    # tshape = tuple(sp.estimate_shape(coord))
     # tshape = (
     #     np.int(np.max(coord[..., 0]) - np.min(coord[..., 0])),
     #     np.int(np.max(coord[..., 1]) - np.min(coord[..., 1])),
@@ -62,6 +62,8 @@ def xdgrasp(
         max_inner_iter=10,
     ).run()
     mps = sp.to_device(mps)
+    tshape = mps.shape[1:]
+    print(tshape)
     # S = []
     # for ii in range(nPhases):
     #     S.append(sp.linop.Multiply(tshape, mps))

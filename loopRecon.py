@@ -34,7 +34,7 @@ xp = sp.Device(device).xp
 try:
     for ii in subjectList:
         subject = ii
-        if int(subject[4:]) > 37:
+        if int(subject[4:]) > 40:
             timei = time.time()
             # print(int(subject[4:]))
             visitList = os.listdir(os.path.join(rootDir, subject + "/mri/"))
@@ -73,9 +73,9 @@ try:
                 thresh = 0.02
             else:
                 thresh = 0.05
-            # Change threshold 2for specific subjects
-            if int(subject[4:]):
-                thresh = 0.03
+            # Change threshold for specific subjects
+            if int(subject[4:]) >= 40:
+                thresh = 0.04
 
             coord = autofov(
                 ksp, coord, dcf, diagnosticsDir, num_ro=150, thresh=thresh, device=device
@@ -95,7 +95,7 @@ try:
             # np.save(mrimgPathnpy,img)
             img = nib.Nifti1Image(img.astype("f"), np.eye(4))
             nib.save(img, mrimgPath)
-            timeF = (timei - time.time()) / 60
+            timeF = (time.time() - timei) / 60
             logging.info("Finshed Subject {} in {} minutes".format(subject, timeF))
             # destroy data every loop
             # del ksp, coord, dcf
