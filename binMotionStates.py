@@ -19,8 +19,6 @@ def binMotionStates(ksp, coord, dcf, resp, n):
         coordB
         dcfB
     """
-    margin = 10.0  # %
-    bins = np.percentile(resp, np.linspace(0.0 + margin, 100.0 - margin, n + 1))
     nSpokes = dcf.shape[0]
     count = 0
     while nSpokes % n is not 0:

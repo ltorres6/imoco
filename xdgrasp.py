@@ -11,7 +11,15 @@ import sigpy.plot as plt
 
 
 def xdgrasp(
-    ksp, coord, dcf, res_scale=1.0, lambda_tv=0.05, inner_iter=10, outer_iter=20, device=0,
+    ksp,
+    coord,
+    dcf,
+    res_scale=1.0,
+    lambda_tv=0.05,
+    inner_iter=10,
+    outer_iter=20,
+    device=0,
+    tv_device=-1,
 ):
     sp.Device(device).use()
     xp = sp.Device(device).xp
@@ -117,7 +125,7 @@ def xdgrasp(
     # else:
     #     print("DOING TV ON GPU...")
     #     tv_device = 0
-    tv_device = -1
+    tv_device = tv_device
     # Do Phase by Phase
     pbarOuter = trange(outer_iter, leave=True)
     for ii in pbarOuter:
