@@ -34,7 +34,7 @@ xp = sp.Device(device).xp
 try:
     for ii in subjectList:
         subject = ii
-        if int(subject[4:]) > 40:
+        if int(subject[4:]) <= 19:
             timei = time.time()
             # print(int(subject[4:]))
             visitList = os.listdir(os.path.join(rootDir, subject + "/mri/"))
@@ -46,9 +46,10 @@ try:
 
             fileList = os.listdir(subjectDir)
             if "MRI_Raw.h5" in fileList:
-                "File Exists, Begin!"
+                print("File Exists, Begin!")
             else:
-                pass
+                print("File does not exist.")
+                continue
             # Set up data paths
             h5Path = subjectDir + "/MRI_Raw.h5"
             # mpsPath = subjectDir + "/mps.npy"
