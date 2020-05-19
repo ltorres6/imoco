@@ -1,5 +1,39 @@
 import sigpy as sp
-import numpy as np
+
+
+def Vstacks(L_Linop, oshape, ishape):
+    assert oshape[0] == len(L_Linop), "Number of Linop mismatch!"
+
+    Linops = sp.linop.Vstack(L_Linop)
+    i_vec_len = 1
+    for tmp in ishape:
+        i_vec_len = i_vec_len * tmp
+    o_vec_len = 1
+    for tmp in oshape:
+        o_vec_len = o_vec_len * tmp
+
+    R1 = sp.linop.Reshape(oshape=(o_vec_len,), ishape=oshape)
+    Linops = R1.H * Linops
+
+    return Linops
+
+
+def Diags(L_Linop, oshape, ishape):
+    assert oshape[0] == ishape[0], "First dim mismatch!"
+    assert oshape[0] == len(L_Linop), "Number of Linop mismatch!"
+    Linops = sp.linop.Diag(L_Linop)
+    i_vec_len = 1
+    for tmp in ishape:
+        i_vec_len = i_vec_len * tmp
+    o_vec_len = 1
+    for tmp in oshape:
+        o_vec_len = o_vec_len * tmp
+
+    R1 = sp.linop.Reshape(oshape=(o_vec_len,), ishape=oshape)
+    R2 = sp.linop.Reshape(oshape=(i_vec_len,), ishape=ishape)
+    Linops = R1.H * Linops * R2
+
+    return Linops
 
 
 def DLD(Linop, idevice, odevice):
@@ -44,3 +78,14 @@ def TVt_prox(X, lamda, iter_max=10, device=-1):
 
     X_b = X_b * scale
     return X_b.astype("complex64")
+
+
+def NFTs(ishape, coord, odevice):
+    idevice = sp.get_device(coord)
+    n_Channel = ishape[0]
+    oshape = list((n_Channel,)) + list(coord.shape[:-1])
+
+    NFT = sp.linop.NUFFT(ishape[1:], coord=coord)
+    NFTs = Diags([DLD(NFT, idevice, odevice) for i in range(n_Channel)], oshape, ishape)
+
+    return NFTs

@@ -64,7 +64,13 @@ try:
             Path(subjectOutDir).mkdir(parents=True, exist_ok=True)
             Path(diagnosticsDir).mkdir(parents=True, exist_ok=True)
 
-            # 1) Convert MRI_Raw.h5 to cfl and read resp waveform.
+            # 1) Convert MR
+cores = "1"
+os.environ["OMP_NUM_THREADS"] = cores  # export OMP_NUM_THREADS=4
+os.environ["OPENBLAS_NUM_THREADS"] = cores  # export OPENBLAS_NUM_THREADS=4
+os.environ["MKL_NUM_THREADS"] = cores  # export MKL_NUM_THREADS=6
+os.environ["VECLIB_MAXIMUM_THREADS"] = cores  # export VECLIB_MAXIMUM_THREADS=4
+os.environ["NUMEXPR_NUM_THREADS"] = cores  # export NUMEXPR_NUM_THREADS=6I_Raw.h5 to cfl and read resp waveform.
             logging.info("Running File Conversion...")
             ksp, coord, dcf, resp = convertUTE(h5Path, nCoils)
 
