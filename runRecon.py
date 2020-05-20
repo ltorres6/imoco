@@ -13,6 +13,7 @@ from estimate_resp import estimate_resp
 from estimate_respSavitzkyGolay import estimate_respSavitzkyGolay
 from binMotionStates import binMotionStates
 from xdgrasp import xdgrasp
+from imoco import imoco
 import logging
 from pathlib import Path
 import cfl
@@ -29,7 +30,8 @@ outDir = "/home/ltorres/data/nicu/"
 device = 0
 nBins = 8
 nCoils = 1
-lambda_tv = 0.05
+xdgrasp_lambda = 0.05
+imoco_lambda = 0.02
 xp = sp.Device(device).xp
 try:
     timei = time.time()
@@ -48,10 +50,17 @@ try:
     # mpsPath = subjectDir + "/mps.npy"
     # respPath = subjectDir + "/resp.npy"
     mrimgPath = subjectOutDir + "/MotionResolved.nii.gz"
+    imgPath = subjectOutDir + "/iMoCo.nii.gz"
+    imgPathr = subjectOutDir + "/iMoCor.nii.gz"
+    imgPathi = subjectOutDir + "/iMoCoi.nii.gz"
     mrimgPathnpy = subjectOutDir + "/MotionResolved.npy"
-    # kspBPath = subjectOutDir + "/kspB.npy"
-    # coordBPath = subjectOutDir + "/coordB.npy"
-    # dcfBPath = subjectOutDir + "/dcfB.npy"
+    # kspBPath = subjectOutDir + "/kspB"
+    # coordBPath = subjectOutDir + "/coordB"
+    # dcfBPath = subjectOutDir + "/dcfB"
+    kspBPath = subjectOutDir + "/MRI_Raw_datam"
+    coordBPath = subjectOutDir + "/MRI_Raw_trajm"
+    dcfBPath = subjectOutDir + "/MRI_Raw_dcf2m"
+
     diagnosticsDir = subjectOutDir + "/diagnostics"
     # Create outpath if doesn't exist.
     Path(subjectOutDir).mkdir(parents=True, exist_ok=True)
@@ -64,7 +73,7 @@ try:
     # 1.5)
     tr = 0.0052  # nicu
     # resp = estimate_resp(ksp[:, :, 0], tr)
-    resp = estimate_respSavitzkyGolay(ksp[:, :, 0], tr, 0.5, 3)
+    resp = estimate_respSavitzkyGolay(ksp[:, :, 0], tr, 0.05, 3)
     plt.LinePlot(resp, mode="r")
     # 2) AutoFOV to reduce matrix size
     logging.info("Running AutoFOV...")
@@ -74,18 +83,35 @@ try:
     # # 3) Bin Motion States
     logging.info("Running BinMotionStates...")
     ksp, coord, dcf = binMotionStates(ksp, coord, dcf, resp, nBins)
+    # cfl.write_cfl(kspBPath, ksp)
+    # cfl.write_cfl(coordBPath, coord)
+    # cfl.write_cfl(dcfBPath, dcf)
     del resp
 
     # # 4) xdgrasp recon
     logging.info("Running Reconstruction...")
-    img = xdgrasp(ksp, coord, dcf, res_scale=1.0, lambda_tv=lambda_tv, device=device, tv_device=0)
+    mrimg = xdgrasp(ksp, coord, dcf, res_scale=0.75, lambda_tv=xdgrasp_lambda, device=device, tv_device=0)
+    mrimgnii = np.moveaxis(np.abs(mrimg), 0, -1)
+    mrimgnii = nib.Nifti1Image(mrimgnii.astype("f"), np.eye(4))
+    nib.save(mrimgnii, mrimgPath)
+    # mrimg = nib.load(mrimgPath).get_fdata()
+    # mrimg = np.moveaxis(mrimg, -1, 0)
+
+    img = imoco(ksp, coord, dcf, mrimg, subjectOutDir, res_scale=1.0, lambda_tv=imoco_lambda,
+                inner_iter=15, outer_iter=20, device=0, tv_device=-1, nRef=-1, reg_flag=1)
     del ksp, coord, dcf
-    # cfl.write_cfl(mrimgPath, img)
-    img = np.moveaxis(np.abs(img), 0, -1)
-    # np.save(mrimgPathnpy,img)
-    img = nib.Nifti1Image(img.astype("f"), np.eye(4))
-    nib.save(img, mrimgPath)
-    timeF = (timei - time.time()) / 60
+    # np.save(subjectOutDir + '/imoco', img)
+    # img = np.load(subjectOutDir + '/imoco.npy')
+    img = sp.resize(np.abs(img), (256, 256, 256))
+    img = nib.Nifti1Image(img, np.eye(4))
+    nib.save(img, imgPath)
+    # imgr = sp.resize(img.real, (256, 256, 256))
+    # imgi = sp.resize(img.imag, (256, 256, 256))
+    # imgr = nib.Nifti1Image(imgr.astype("f"), np.eye(4))
+    # imgi = nib.Nifti1Image(imgi.astype("f"), np.eye(4))
+    # nib.save(imgr, imgPathr)
+    # nib.save(imgi, imgPathi)
+    timeF = (time.time() - timei) / 60
     logging.info("Finshed Subject in {} minutes".format(timeF))
     # destroy data every loop
     # del ksp, coord, dcf

@@ -60,5 +60,4 @@ function Ix = moco(basePath, ref)
     end
     Ix = padToOriginal(Ix);
     Ix = flip(flip(flip(Ix,3),2),1);
-    % save([baseName, '_mocofull_pd', num2str(m_ph), '.mat'], 'Ix');
 end

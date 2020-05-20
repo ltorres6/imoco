@@ -2,8 +2,8 @@ import argparse
 import sigpy as sp
 import sigpy.mri as mr
 import numpy as np
-import linops
-from demons import Demons
+from imoco_e import cfl, ext, reg
+from imoco_e.linop_e import NFTs, Diags, DLD, Vstacks
 
 
 def imoco(
@@ -11,6 +11,7 @@ def imoco(
     coord,
     dcf,
     mrimg,
+    fname,
     res_scale=1.0,
     lambda_tv=0.05,
     inner_iter=15,
@@ -18,6 +19,7 @@ def imoco(
     device=-1,
     tv_device=-1,
     nRef=-1,
+    reg_flag=0,
 ):
     sp.Device(device).use()
     xp = sp.Device(device).xp
@@ -57,93 +59,115 @@ def imoco(
         max_inner_iter=10,
     ).run()
     mps = sp.to_device(mps)
+    if nCoils <= 1:
+        mps = np.ones_like(mps)
     tshape = mps.shape[1:]
     print(tshape)
     S = sp.linop.Multiply(tshape, mps)
 
     # registration
+    # print("Registration...")
+    # # Options
+    # # Compute Device: -1=CPU or 0=GPU
+    # device = 0
+
+    # # Demons Force Variation - "passive" , "active", "inverseConsistent" https://arxiv.org/pdf/0909.0928.pdf
+    # variant = "active"
+    # diffeomorphic = False
+    # compositionType = "A"
+    # nLevels = 3
+    # cThresh = 1e-6
+    # max_iter = 4000
+    # alpha = 2.0
+
+    # # Gaussian Smoothing Sigmas.
+    # diffusionSigmas = 2.0
+    # fluidSigmas = 2.0
+
+    # M_fields = []
+    # iM_fields = []
+    # for ii in range(nPhases):
+    #     W, invW = Demons(
+    #         mrimg[nRef],
+    #         mrimg[ii],
+    #         nLevels=nLevels,
+    #         diffusionSigmas=diffusionSigmas,
+    #         fluidSigmas=fluidSigmas,
+    #         max_iter=max_iter,
+    #         alpha=alpha,
+    #         cThresh=cThresh,
+    #         variant=variant,
+    #         diffeomorphic=diffeomorphic,
+    #         compositionType=compositionType,
+    #         device=device,
+    #     ).run()
+    #     M_fields.append(W)
+    #     iM_fields.append(invW)
+    # M_fields = np.asarray(M_fields)
+    # iM_fields = np.asarray(iM_fields)
+    ## registration
+
     print("Registration...")
-    # Options
-    # Compute Device: -1=CPU or 0=GPU
-    device = 0
-
-    # Demons Force Variation - "passive" , "active", "inverseConsistent" https://arxiv.org/pdf/0909.0928.pdf
-    variant = "active"
-    diffeomorphic = False
-    compositionType = "A"
-    nLevels = 3
-    cThresh = 1e-6
-    max_iter = 4000
-    alpha = 2.0
-
-    # Gaussian Smoothing Sigmas.
-    diffusionSigmas = 2.0
-    fluidSigmas = 2.0
-
     M_fields = []
     iM_fields = []
-    for ii in range(nPhases):
-        W, invW = Demons(
-            mrimg[nRef],
-            mrimg[ii],
-            nLevels=nLevels,
-            diffusionSigmas=diffusionSigmas,
-            fluidSigmas=fluidSigmas,
-            max_iter=max_iter,
-            alpha=alpha,
-            cThresh=cThresh,
-            variant=variant,
-            diffeomorphic=diffeomorphic,
-            compositionType=compositionType,
-            device=device,
-        ).run()
-        M_fields.append(W)
-        iM_fields.append(invW)
-    M_fields = np.asarray(M_fields)
-    iM_fields = np.asarray(iM_fields)
+    if reg_flag is 1:
+        for i in range(nPhases):
+            M_field, iM_field = reg.ANTsReg(np.abs(mrimg[nRef]), np.abs(mrimg[i]))
+            M_fields.append(M_field)
+            iM_fields.append(iM_field)
+        M_fields = np.asarray(M_fields)
+        iM_fields = np.asarray(iM_fields)
+        np.save(fname + "/M_mr.npy", M_fields)
+        np.save(fname + "/iM_mr.npy", iM_fields)
+    else:
+        M_fields = np.load(fname + "/M_mr.npy")
+        iM_fields = np.load(fname + "/iM_mr.npy")
 
     iM_fields = [iM_fields[i] for i in range(iM_fields.shape[0])]
     M_fields = [M_fields[i] for i in range(M_fields.shape[0])]
+
+    ######## TODO scale M_field
+    print("Motion Field scaling...")
+    M_fields = [reg.M_scale(M, tshape) for M in M_fields]
+    iM_fields = [reg.M_scale(M, tshape) for M in iM_fields]
 
     # Recon
     print("Prep...")
     Ms = []
     M0s = []
     for i in range(nPhases):
-        # M = reg.interp_op(tshape,iM_fields[i],M_fields[i])
         M = reg.interp_op(tshape, M_fields[i])
         M0 = reg.interp_op(tshape, np.zeros(tshape + (3,)))
-        M = linops.DLD(M, device=sp.Device(device))
-        M0 = linops.DLD(M0, device=sp.Device(device))
+        M = DLD(M, device=sp.Device(device))
+        M0 = DLD(M0, device=sp.Device(device))
         Ms.append(M)
         M0s.append(M0)
-    Ms = linops.Diags(Ms, oshape=(nPhases,) + tshape, ishape=(nPhases,) + tshape)
-    M0s = linops.Diags(M0s, oshape=(nPhases,) + tshape, ishape=(nPhases,) + tshape)
+    Ms = Diags(Ms, oshape=(nPhases,) + tshape, ishape=(nPhases,) + tshape)
+    M0s = Diags(M0s, oshape=(nPhases,) + tshape, ishape=(nPhases,) + tshape)
 
     PFTSMs = []
     Is = []
     for i in range(nPhases):
         Is.append(sp.linop.Identity(tshape))
-        FTs = linops.NFTs((nCoils,) + tshape, coord[i, 0, 0, ...], device=sp.Device(device))
-        M = linops.interp_op(tshape, iM_fields[i])
-        M = linops.DLD(M, device=sp.Device(device))
-        W = sp.linop.Multiply((nCoils, nSpokes, nReadouts,), dcf[i, 0, 0, :, :, 0])
+        FTs = NFTs((nCoils,) + tshape, coord[i], device=sp.Device(device))
+        M = reg.interp_op(tshape, iM_fields[i])
+        M = DLD(M, device=sp.Device(device))
+        W = sp.linop.Multiply((nCoils, nSpokes, nReadouts,), dcf[i])
         FTSM = W * FTs * S * M
         PFTSMs.append(FTSM)
     PFTSMs = Diags(
         PFTSMs, oshape=(nPhases, nCoils, nSpokes, nReadouts,), ishape=(nPhases,) + tshape
-    ) * linops.Vstacks(Is, ishape=tshape, oshape=(nPhases,) + tshape)
+    ) * Vstacks(Is, ishape=tshape, oshape=(nPhases,) + tshape)
 
     # precondition
     print("Preconditioner calculation...")
     tmp = PFTSMs.H * PFTSMs * np.complex64(np.ones(tshape))
     L = np.mean(np.abs(tmp))
-    wksp = ksp[:, 0, :, :, :, 0] * dcf[:, 0, :, :, :, 0]
-
+    wksp = ksp * np.expand_dims(dcf, axis=1)
     TV = sp.linop.FiniteDifference(PFTSMs.ishape, axes=(0, 1, 2))
     # ####### debug
     # print("TV dim:{}".format(TV.oshape))
-    proxg = sp.prox.UnitaryTransform(sp.prox.L1Reg(TV.oshape, lambda_tv), TV)
+    # proxg = sp.prox.UnitaryTransform(sp.prox.L1Reg(TV.oshape, lambda_tv), TV)
 
     # ADMM
     print("Recon...")
@@ -198,5 +222,5 @@ if __name__ == "__main__":
         args.device,
     )
     print("writing ksp...")
-    plt.ImagePlot(img)
+    # plt.ImagePlot(img)
     cfl.write_cfl(args.img_file, img)

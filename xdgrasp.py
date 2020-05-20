@@ -70,6 +70,8 @@ def xdgrasp(
         max_inner_iter=10,
     ).run()
     mps = sp.to_device(mps)
+    if nCoils <= 1:
+        mps = np.ones_like(mps)
     tshape = mps.shape[1:]
     print(tshape)
     # S = []
@@ -200,6 +202,5 @@ if __name__ == "__main__":
         args.device,
     )
     print("writing data...")
-    plt.ImagePlot(img)
+    # plt.ImagePlot(img)
     cfl.write_cfl(args.img_file, img)
-    # np.save(args.img, img)
