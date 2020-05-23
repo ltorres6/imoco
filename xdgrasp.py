@@ -43,7 +43,7 @@ def xdgrasp(
         print("Coil Compressed kspace shape: {} ...".format(ksp.shape))
     coord = coord[..., :nReadouts, :]
     ksp = ksp[..., :nReadouts]
-    dcf = dcf[..., :nReadouts] ** 0.5
+    dcf = dcf[..., :nReadouts]
 
     print("Image Shape Estimate: {}".format(sp.estimate_shape(coord)))
     # nPhases, nEcalib, nCoils, nSpokes, nReadouts, _ = data.shape

@@ -17,7 +17,6 @@ def imoco(
     inner_iter=15,
     outer_iter=20,
     device=-1,
-    tv_device=-1,
     nRef=-1,
     reg_flag=0,
 ):
@@ -38,7 +37,7 @@ def imoco(
 
     coord = coord[..., :nReadouts, :]
     ksp = ksp[..., :nReadouts]
-    dcf = dcf[..., :nReadouts] ** 0.5
+    dcf = dcf[..., :nReadouts]
 
     print("Image Shape Estimate: {}".format(sp.estimate_shape(coord)))
     # nPhases, nEcalib, nCoils, nSpokes, nReadouts, _ = data.shape
@@ -68,9 +67,7 @@ def imoco(
     # registration
     # print("Registration...")
     # # Options
-    # # Compute Device: -1=CPU or 0=GPU
-    # device = 0
-
+    # # Compute Device: -1=CPU or 0=GPUmrimg
     # # Demons Force Variation - "passive" , "active", "inverseConsistent" https://arxiv.org/pdf/0909.0928.pdf
     # variant = "active"
     # diffeomorphic = False

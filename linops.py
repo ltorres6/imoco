@@ -67,7 +67,7 @@ def TVt_prox(X, lamda, iter_max=10, device=-1):
     xp = sp.get_array_module(X)
     scale = xp.max(xp.abs(X))
     X = X / scale
-    TVt = FD(X.shape, axes=(0, 1, 2, 3))
+    TVt = FD(X.shape, axes=(0,))
     X_b = X
     Y = TVt * X
     Y = Y / (xp.abs(Y) + 1e-9) * xp.minimum(xp.abs(Y) + 1e-9, 1)
