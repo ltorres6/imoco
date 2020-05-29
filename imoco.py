@@ -2,8 +2,11 @@ import argparse
 import sigpy as sp
 import sigpy.mri as mr
 import numpy as np
-from imoco_e import cfl, ext, reg
+from imoco_e import cfl, reg
 from imoco_e.linop_e import NFTs, Diags, DLD, Vstacks
+from tqdm import trange
+import logging
+import time
 
 
 def imoco(
@@ -20,16 +23,17 @@ def imoco(
     nRef=-1,
     reg_flag=0,
 ):
+    timeStart = time.time()
     sp.Device(device).use()
     xp = sp.Device(device).xp
     if device >= 0:
-        print("Using GPU...")
+        logging.info("Using GPU...")
     else:
-        print("Using CPU...")
+        logging.info("Using CPU...")
 
-    print("Kspace Shape: {}...".format(ksp.shape))
-    print("trajectory Shape: {}...".format(coord.shape))
-    print("DCF Shape: {}....".format(dcf.shape))
+    logging.info("Kspace Shape: {}...".format(ksp.shape))
+    logging.info("trajectory Shape: {}...".format(coord.shape))
+    logging.info("DCF Shape: {}....".format(dcf.shape))
 
     nf_arr = np.sqrt(np.sum(coord[0, 0, :, :] ** 2, axis=1))
     nReadouts = np.sum(nf_arr < np.max(nf_arr) * res_scale)
@@ -39,17 +43,17 @@ def imoco(
     ksp = ksp[..., :nReadouts]
     dcf = dcf[..., :nReadouts]
 
-    print("Image Shape Estimate: {}".format(sp.estimate_shape(coord)))
+    logging.info("Image Shape Estimate: {}".format(sp.estimate_shape(coord)))
     # nPhases, nEcalib, nCoils, nSpokes, nReadouts, _ = data.shape
     nPhases, nCoils, nSpokes, nReadouts = ksp.shape
 
     # calibration
-    print("Running calibration...")
+    logging.info("Running calibration...")
     # Map for each Motion Phase?
     mps = mr.app.JsenseRecon(
         ksp[0],
         coord=coord[0],
-        weights=dcf[0],
+        weights=dcf[0]**2,
         mps_ker_width=12,
         ksp_calib_width=32,
         lamda=0,
@@ -61,13 +65,12 @@ def imoco(
     if nCoils <= 1:
         mps = np.ones_like(mps)
     tshape = mps.shape[1:]
-    print(tshape)
     S = sp.linop.Multiply(tshape, mps)
 
     # registration
     # print("Registration...")
     # # Options
-    # # Compute Device: -1=CPU or 0=GPUmrimg
+    # # Compute Device: -1=CPU or 0=GPU
     # # Demons Force Variation - "passive" , "active", "inverseConsistent" https://arxiv.org/pdf/0909.0928.pdf
     # variant = "active"
     # diffeomorphic = False
@@ -102,9 +105,9 @@ def imoco(
     #     iM_fields.append(invW)
     # M_fields = np.asarray(M_fields)
     # iM_fields = np.asarray(iM_fields)
-    ## registration
+    # registration
 
-    print("Registration...")
+    logging.info("Registration...")
     M_fields = []
     iM_fields = []
     if reg_flag is 1:
@@ -114,22 +117,23 @@ def imoco(
             iM_fields.append(iM_field)
         M_fields = np.asarray(M_fields)
         iM_fields = np.asarray(iM_fields)
-        np.save(fname + "/M_mr.npy", M_fields)
-        np.save(fname + "/iM_mr.npy", iM_fields)
+        # np.save(fname + "/M_mr.npy", M_fields)
+        # np.save(fname + "/iM_mr.npy", iM_fields)
     else:
-        M_fields = np.load(fname + "/M_mr.npy")
-        iM_fields = np.load(fname + "/iM_mr.npy")
+        pass
+        # M_fields = np.load(fname + "/M_mr.npy")
+        # iM_fields = np.load(fname + "/iM_mr.npy")
 
     iM_fields = [iM_fields[i] for i in range(iM_fields.shape[0])]
     M_fields = [M_fields[i] for i in range(M_fields.shape[0])]
 
-    ######## TODO scale M_field
-    print("Motion Field scaling...")
+    # Scale Motion field (multply values by scale and expand by scale)
+    logging.info("Motion Field scaling...")
     M_fields = [reg.M_scale(M, tshape) for M in M_fields]
     iM_fields = [reg.M_scale(M, tshape) for M in iM_fields]
 
     # Recon
-    print("Prep...")
+    logging.info("Prep...")
     Ms = []
     M0s = []
     for i in range(nPhases):
@@ -157,35 +161,46 @@ def imoco(
     ) * Vstacks(Is, ishape=tshape, oshape=(nPhases,) + tshape)
 
     # precondition
-    print("Preconditioner calculation...")
+    logging.info("Preconditioner calculation...")
     tmp = PFTSMs.H * PFTSMs * np.complex64(np.ones(tshape))
     L = np.mean(np.abs(tmp))
-    wksp = ksp * np.expand_dims(dcf, axis=1)
+    logging.info("Preconditioner Value: {}".format(L))
+
+    dcf = dcf[:, xp.newaxis, ...]
+    ksp = ksp * dcf
     TV = sp.linop.FiniteDifference(PFTSMs.ishape, axes=(0, 1, 2))
     # ####### debug
     # print("TV dim:{}".format(TV.oshape))
     # proxg = sp.prox.UnitaryTransform(sp.prox.L1Reg(TV.oshape, lambda_tv), TV)
 
     # ADMM
-    print("Recon...")
-    alpha = np.max(np.abs(PFTSMs.H * wksp))
-    ###### debug
-    print("alpha:{}".format(alpha))
+    logging.info("Running iMoCo Recon...")
+    alpha = np.max(np.abs(PFTSMs.H * ksp))
+    # debug
+    logging.debug("alpha:{}".format(alpha))
     sigma = 0.4
     tau = 0.4
     X = np.zeros(tshape, dtype=np.complex64)
-    p = np.zeros_like(wksp)
+    p = np.zeros_like(ksp)
     X0 = np.zeros_like(X)
     q = np.zeros((3,) + tshape, dtype=np.complex64)
-    for i in range(outer_iter):
-        p = (p + sigma * (PFTSMs * X - wksp)) / (1 + sigma)
+    pbarOuter = trange(outer_iter, leave=True)
+    for ii in pbarOuter:
+        timeI = time.time()
+        pbarOuter.set_description("iMoco Outer Iter {}".format(ii))
+        p = (p + sigma * (PFTSMs * X - ksp)) / (1 + sigma)
         q = q + sigma * TV * X
         q = q / (np.maximum(np.abs(q), alpha) / alpha)
-
-        X0 = X
         X = X - tau * (1 / L * PFTSMs.H * p + lambda_tv * TV.H * q)
-        print("outer iter:{}, res:{}".format(i, np.linalg.norm(X - X0) / np.linalg.norm(X0 + 1e-9)))
-
+        timeF = time.time()
+        pbarOuter.set_postfix(
+            loss=np.linalg.norm(X - X0) / np.linalg.norm(X), time=timeF - timeI
+        )
+        X0 = X
+    X = np.transpose(X, (2, 1, 0))
+    X = np.flip(X, (0, 1, 2))
+    timeFinish = time.time()
+    logging.info("iMoco Recon Finished in: {} min...".format((timeFinish - timeStart) / 60))
     return X
 
 

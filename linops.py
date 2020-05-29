@@ -77,7 +77,7 @@ def TVt_prox(X, lamda, iter_max=10, device=-1):
         Y = Y / (xp.abs(Y) + 1e-9) * xp.minimum(xp.abs(Y) + 1e-9, 1)
 
     X_b = X_b * scale
-    return X_b.astype("complex64")
+    return X_b
 
 
 def NFTs(ishape, coord, odevice):

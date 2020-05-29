@@ -5,7 +5,7 @@ import logging
 # import matplotlib.pyplot as plt
 
 
-def binMotionStates(ksp, coord, dcf, resp, n):
+def binMotionStatesLocal(ksp, coord, dcf, resp, n):
     """Bin kspace, coordinates, and dcf by respiratory motion.
 
     Args:

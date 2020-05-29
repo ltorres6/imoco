@@ -43,7 +43,7 @@ def ANTsAff(If, Im, vox_res=[1, 1, 1], reg_level=[8, 4, 2], gauss_filt=[2, 2, 1]
 
     ants_cmd = "antsRegistration -d 3 -m MI[ {}, {}, 1, 50 ] -t Rigid[0.1] \
     -c [ 100x100x40, 1e-6, 10 ] -s {}vox -f {} --winsorize-image-intensities [0.1,1]\
-    -l 1 -u 1 -z 1 -v -o tmp_".format(
+    -l 1 -u 1 -z 1 -o tmp_".format(
         "tmp_Im.nii", "tmp_If.nii", gauss_filt_s, reg_level_s
     )
     os.system(ants_cmd)
@@ -120,7 +120,7 @@ def ANTsReg(If, Im, vox_res=[1, 1, 1], reg_level=[8, 4, 2], gauss_filt=[2, 2, 1]
     gauss_filt_s = "x".join([str(t) for t in gauss_filt])
     ants_cmd = "antsRegistration -d 3 -m Demons[ {}, {}, 1, 4 ] -t SyN[ 0.1, 5, 3 ] \
     -c [ 100x100x40, 1e-6, 10 ] -s {}vox -f {} --winsorize-image-intensities [0.1,1]\
-    -l 1 -u 1 -z 1 -v -o tmp_".format(
+    -l 1 -u 1 -o tmp_".format(
         "tmp_Im.nii", "tmp_If.nii", gauss_filt_s, reg_level_s
     )
     os.system(ants_cmd)

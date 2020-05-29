@@ -1,13 +1,12 @@
 import argparse
 import sigpy as sp
 import numpy as np
-from coilCompression import pcaCoilCompression
 import sigpy.mri as mr
-import linops
+from imoco_e import cfl, ext
+from imoco_e.linop_e import NFTs, Diags
 from tqdm import trange
-import cfl
 import time
-import sigpy.plot as plt
+import logging
 
 
 def xdgrasp(
@@ -21,47 +20,35 @@ def xdgrasp(
     device=0,
     tv_device=-1,
 ):
+    timeStart = time.time()
     sp.Device(device).use()
     xp = sp.Device(device).xp
     if device >= 0:
-        print("Using GPU...")
+        logging.info("Using GPU...")
     else:
-        print("Using CPU...")
+        logging.info("Using CPU...")
 
-    print("Kspace Shape: {}...".format(ksp.shape))
-    print("trajectory Shape: {}...".format(coord.shape))
-    print("DCF Shape: {}....".format(dcf.shape))
+    logging.info("Kspace Shape: {}...".format(ksp.shape))
+    logging.info("trajectory Shape: {}...".format(coord.shape))
+    logging.info("DCF Shape: {}....".format(dcf.shape))
 
     nf_arr = np.sqrt(np.sum(coord[0, 0, :, :] ** 2, axis=1))
     nReadouts = np.sum(nf_arr < np.max(nf_arr) * res_scale)
     del nf_arr
 
-    # Coil Compression
-    if ksp.shape[1] > 8:
-        print("Running Coil Compression...")
-        ksp = pcaCoilCompression(kdata=ksp, axis=1, target_channels=8)
-        print("Coil Compressed kspace shape: {} ...".format(ksp.shape))
     coord = coord[..., :nReadouts, :]
     ksp = ksp[..., :nReadouts]
     dcf = dcf[..., :nReadouts]
-
-    print("Image Shape Estimate: {}".format(sp.estimate_shape(coord)))
-    # nPhases, nEcalib, nCoils, nSpokes, nReadouts, _ = data.shape
+    logging.info("Image Shape Estimate: {}".format(sp.estimate_shape(coord)))
     nPhases, nCoils, nSpokes, nReadouts = ksp.shape
-    # tshape = tuple(sp.estimate_shape(coord))
-    # tshape = (
-    #     np.int(np.max(coord[..., 0]) - np.min(coord[..., 0])),
-    #     np.int(np.max(coord[..., 1]) - np.min(coord[..., 1])),
-    #     np.int(np.max(coord[..., 2]) - np.min(coord[..., 2])),
-    # )
 
     # calibration
-    print("Running calibration...")
+    logging.info("Running calibration...")
     # Map for each Motion Phase?
     mps = mr.app.JsenseRecon(
         ksp[0],
         coord=coord[0],
-        weights=dcf[0],
+        weights=dcf[0]**2,
         mps_ker_width=12,
         ksp_calib_width=32,
         lamda=0,
@@ -73,102 +60,50 @@ def xdgrasp(
     if nCoils <= 1:
         mps = np.ones_like(mps)
     tshape = mps.shape[1:]
-    print(tshape)
-    # S = []
-    # for ii in range(nPhases):
-    #     S.append(sp.linop.Multiply(tshape, mps))
-    # for jj in range(nCoils):
-    #     S.append(sp.linop.Multiply(tshape, mps[jj]))
-    # del mps
-
-    L = np.zeros((nPhases,) + tshape, dtype=np.complex64)
-    img_ones = xp.ones(tshape, dtype=xp.complex64)
-    print("Computing Preconditioner")
-    timeI = time.time()
+    S = sp.linop.Multiply(tshape, mps)
+    del mps
+    logging.info("Image Shape: {}....".format(tshape))
+    logging.info("Computing Linops...")
+    PFTSs = []
     for ii in trange(nPhases, desc="Motion Phases"):
-        coord_t = sp.to_device(coord[ii], device)
-        dcf_t = sp.to_device(dcf[ii], device)
-        img_t = 0
-        for jj in range(nCoils):
-            # idx = ii * nCoils + jj
-            mps_c = sp.to_device(mps[jj], device)
-            # plt.ImagePlot(mps_c)
-            # plt.ImagePlot(img_ones * mps_c)
-            img_tc = xp.squeeze(sp.nufft(img_ones * mps_c, coord_t))
-            # plt.ImagePlot(img_tc)
-            img_tc *= dcf_t ** 2
-            # plt.ImagePlot(img_tc)
-            img_tc = sp.nufft_adjoint(img_tc, coord_t, oshape=tshape)
-            # plt.ImagePlot(img_tc)
-            img_tc *= xp.conj(mps_c)
-            # plt.ImagePlot(img_tc)
-            img_t += img_tc
-            # plt.ImagePlot(img_t)
-        L[ii, ...] = sp.to_device(img_t)
+        FTs = NFTs((nCoils,)+tshape, coord[ii], device=sp.Device(device))
+        W = sp.linop.Multiply((nCoils, nSpokes, nReadouts,), dcf[ii])
+        FTSs = W*FTs*S
+        PFTSs.append(FTSs)
+    PFTSs = Diags(PFTSs, oshape=(nPhases, nCoils, nSpokes, nReadouts,), ishape=(nPhases,) + tshape)
+
+    logging.info("Computing Preconditioner...")
+    timeI = time.time()
+    L = PFTSs.H * PFTSs * np.complex64(np.ones((nPhases,) + tshape))
     L = np.mean(np.abs(L))
-    print(L)
     timeF = time.time()
-    print("Time for preconditioner: {} seconds.".format(timeF - timeI))
+    logging.info("Preconditioner Value: {}".format(L))
+    logging.info("Time for preconditioner: {} seconds.".format(timeF - timeI))
 
     # reconstruction
-    print("running reconstruction")
     dcf = dcf[:, xp.newaxis, ...]
-    ksp *= dcf
-    print(ksp.shape)
+    # plt.ImagePlot(ksp)
+    ksp = ksp * dcf
+    # plt.ImagePlot(ksp)
     img = np.zeros((nPhases,) + tshape, dtype=np.complex64)
     Y = np.zeros_like(ksp)
     img_0 = np.zeros_like(img)
     tau = 0.4
     sigma = 0.4
-    # memory_size = 2 * 8 * np.prod(tshape) / (1024 ** 3)
-    # if memory_size > 0.86:
-    #     print("DOING TV ON CPU!!")
-    #     tv_device = -1
-    # else:
-    #     print("DOING TV ON GPU...")
-    #     tv_device = 0
-    tv_device = tv_device
-    # Do Phase by Phase
+    logging.info("Running XD-Grasp")
     pbarOuter = trange(outer_iter, leave=True)
     for ii in pbarOuter:
         timeI = time.time()
-        pbarOuter.set_description("Processing Outer Iteration {}".format(ii))
-        # pbarMotion = trange(nPhases, desc="Motion Phases")
-        for jj in range(nPhases):
-            # pbarMotion.set_description("Processing Motion Phase {}".format(jj))
-            img_p = sp.to_device(img[jj], device)
-            coord_t = xp.squeeze(sp.to_device(coord[jj], device))
-            dcf_t = xp.squeeze(sp.to_device(dcf[jj], device))
-            img_t = 0
-            # Do coil by coil
-            for kk in range(nCoils):
-                # idx = jj * nCoils + kk
-                # WFS = WF * S[idx]
-                # kspace to memory
-                mps_c = xp.squeeze(sp.to_device(mps[kk], device))
-                ksp_p = sp.to_device(ksp[jj, kk], device)
-                Yt = sp.to_device(Y[jj, kk], device)
-                # update Yt
-                Yt += sigma * (1 / L * dcf_t * xp.squeeze(sp.nufft(img_p * mps_c, coord_t)) - ksp_p)
-                Yt /= 1 + sigma
-                # Accumulate over coils
-                img_p -= tau * xp.conj(mps_c) * sp.nufft_adjoint(dcf_t * Yt, coord_t, oshape=tshape)
-                Y[jj, kk] = sp.to_device(Yt.copy())
-                del Yt, ksp_p
-                img_t += img_p
-                # plt.ImagePlot(img_p)
-            # img_p = xp.stack((img_t.copy(), img_p2))
-            img[jj] = sp.to_device(img_t)
-        del img_p, img_t, coord_t, dcf_t  # Try to clear GPU memory.
-        img = sp.to_device(linops.TVt_prox(img, lambda_tv, iter_max=inner_iter, device=tv_device))
-        # plt.ImagePlot(img_p)
-        # img[jj] = sp.to_device(img_p[0])
+        pbarOuter.set_description("XD-Grasp Outer Iter {}".format(ii))
+        Y = (Y + sigma*(1/L*PFTSs*img-ksp))/(1+sigma)
+        img = np.complex64(ext.TVt_prox(img-tau*PFTSs.H*Y, lambda_tv))
         timeF = time.time()
         pbarOuter.set_postfix(
             loss=np.linalg.norm(img - img_0) / np.linalg.norm(img), time=timeF - timeI
         )
         img_0 = img
-    print("done...")
+    timeFinish = time.time()
+    logging.info("XDGrasp Recon Finished in: {} min...".format((timeFinish - timeStart) / 60))
     return sp.to_device(img)
 
 

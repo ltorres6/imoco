@@ -7,7 +7,7 @@ import os
 from coilCompression import pcaCoilCompression
 
 
-def convertUTE(h5_file, nCoils=8, dsfSpokes=1.0):
+def convertUTE(h5_file, nCoilsPCA=8, dsfSpokes=1.0):
 
     with h5py.File(h5_file, "r") as hf:
 
@@ -52,26 +52,28 @@ def convertUTE(h5_file, nCoils=8, dsfSpokes=1.0):
             )
         logging.info(f"Stacking as np array...")
         ksp = np.stack(ksp, axis=0)
-        if num_coils <= nCoils:
+        if num_coils <= nCoilsPCA:
             try:
                 noise = hf["Kdata"]["Noise"]["real"] + 1j * hf["Kdata"]["Noise"]["imag"]
                 logging.info("Whitening ksp.")
                 cov = mr.util.get_cov(noise)
                 ksp = mr.util.whiten(ksp, cov)
+                # ksp /= np.abs(ksp).max()
             except (MemoryError, Exception):
                 logging.info("No noise data exists. Scaling by max value.")
                 ksp /= np.abs(ksp).max()
         else:
             try:
                 logging.info(
-                    "Too many channels for whitening. Compressing to {} channels.".format(nCoils)
+                    "Too many channels for whitening. Compressing to {} channels.".format(nCoilsPCA)
                 )
-                ksp = pcaCoilCompression(kdata=ksp, axis=0, target_channels=nCoils)
+                ksp = pcaCoilCompression(kdata=ksp, axis=0, target_channels=nCoilsPCA)
                 noise = hf["Kdata"]["Noise"]["real"] + 1j * hf["Kdata"]["Noise"]["imag"]
-                noise = pcaCoilCompression(kdata=noise, axis=0, target_channels=nCoils)
+                noise = pcaCoilCompression(kdata=noise, axis=0, target_channels=nCoilsPCA)
                 logging.info("Whitening ksp.")
                 cov = mr.util.get_cov(noise)
                 ksp = mr.util.whiten(ksp, cov)
+                # ksp /= np.abs(ksp).max()
             except (MemoryError, Exception):
                 logging.info("No noise data exists. Scaling by max value.")
                 ksp /= np.abs(ksp).max()
@@ -83,7 +85,7 @@ def convertUTE(h5_file, nCoils=8, dsfSpokes=1.0):
     dcf = dcf[:nSpokes, :]
     logging.info(f"Total Number of Spokes: {totalSpokes}, Requested Number of Spokes: {nSpokes}")
 
-    return ksp, coord, dcf, resp
+    return ksp, coord, dcf, resp/resp.max()
 
 
 if __name__ == "__main__":

@@ -47,7 +47,7 @@ def autofov(ksp, coord, dcf, diagPath, num_ro=100, device=-1, thresh=0.4, radial
             ro_range = slice(ro_center - num_ro // 2, ro_center + num_ro // 2, 1)
         else:
             ro_range = slice(0, num_ro, 1)
-        logging.info("Input Shape: {}".format(sp.estimate_shape(coord)))
+        logging.info("AutoFov Input Shape: {}".format(sp.estimate_shape(coord)))
 
         kspc = ksp[:, :, ro_range]
         coordc = coord[:, ro_range, :]
@@ -139,7 +139,7 @@ def autofov(ksp, coord, dcf, diagPath, num_ro=100, device=-1, thresh=0.4, radial
         ima = Image.fromarray(ima)
         ima = ima.convert("L")
         ima.save(diagPath + "/d_effectiveFOVAxial.jpg")
-        logging.info("Output Shape: {}".format(sp.estimate_shape(coord)))
+        logging.info("AutoFov Output Shape: {}".format(sp.estimate_shape(coord)))
         logging.info("Scaling Factors: {}".format(img_scale))
         np.save(diagPath + "/fovScaleFactors.npy", img_scale)
 

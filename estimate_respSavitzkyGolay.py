@@ -3,7 +3,7 @@ import numpy as np
 from scipy.signal import savgol_filter
 
 
-def estimate_respSavitzkyGolay(dc, tr, window=1.0, order=3):
+def estimate_respSavitzkyGolay(dc, tr, window=2.0, order=3):
     """Estimate respiratory signal from DC.
 
     The function performs:
@@ -30,7 +30,7 @@ def estimate_respSavitzkyGolay(dc, tr, window=1.0, order=3):
         if sigma_c > sigma_max:
             resp = (resp_c - np.median(resp_c)) / sigma_c
             sigma_max = sigma_c
-    return resp
+    return resp/resp.max()
 
 
 if __name__ == "__main__":
