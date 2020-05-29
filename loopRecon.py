@@ -114,7 +114,13 @@ try:
 
             # 2) AutoFOV to reduce matrix size
             logging.info("Running AutoFOV...")
-            thresh = 0.05
+            if int(subject[4:]) > 32:
+                thresh = 0.02
+            else:
+                thresh = 0.05
+            # Change threshold for specific subjects
+            if int(subject[4:]) >= 40:
+                thresh = 0.04
             coord = autofov(ksp, coord, dcf**2, diagnosticsDir, num_ro=150, thresh=thresh, device=device)
 
             # 3) Bin Motion States

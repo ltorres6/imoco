@@ -42,8 +42,7 @@ outDir = "/home/ltorres/data/ipf/ltorres/"+subject+"/mri/"+visit+"/"
 device = 0
 nBins = 6
 nCoils = 8
-ignoreExisting = True
-register = 1
+ignoreExisting = False
 dc_signal = 1
 nRef = -1  # Reference Frame (last ie expiratory)
 xp = sp.Device(device).xp
@@ -99,7 +98,7 @@ try:
     else:
         tr = 0.0034  # ipf
         tv_device = -1
-        xdgrasp_lambda = 0.025
+        xdgrasp_lambda = 0.05
         imoco_lambda = 0.02
     if dc_signal == 1:
         logging.info("Estimating Resp Waveform from DC signal...")
@@ -142,7 +141,7 @@ try:
     # 5) iMoCo recon expir
     if os.path.exists(imgPath) is False or ignoreExisting is True:
         logging.info("Running iMoCo Reconstruction...")
-        img = imoco(ksp, coord, dcf, mrimg, diagnosticsDir, res_scale=1.0, lambda_tv=imoco_lambda, inner_iter=15, outer_iter=20, device=device, nRef=nRef, reg_flag=register)
+        img = imoco(ksp, coord, dcf, mrimg, diagnosticsDir, res_scale=1.0, lambda_tv=imoco_lambda, inner_iter=15, outer_iter=20, device=device, nRef=nRef)
         img = sp.resize(np.abs(img), (256, 256, 256))
         img = nib.Nifti1Image(img, np.eye(4))
         nib.save(img, imgPath)
@@ -151,7 +150,7 @@ try:
     # 6) iMoCo recon Insp
     if os.path.exists(imgInspPath) is False or ignoreExisting is True:
         logging.info("Running iMoCo Inspiratory Reconstruction...")
-        imgInsp = imoco(ksp, coord, dcf, mrimg, diagnosticsDir, res_scale=1.0, lambda_tv=imoco_lambda, inner_iter=15, outer_iter=20, device=device, nRef=0, reg_flag=register)
+        imgInsp = imoco(ksp, coord, dcf, mrimg, diagnosticsDir, res_scale=1.0, lambda_tv=imoco_lambda, inner_iter=15, outer_iter=20, device=device, nRef=0)
         imgInsp = sp.resize(np.abs(imgInsp), (256, 256, 256))
         imgInsp = nib.Nifti1Image(imgInsp, np.eye(4))
         nib.save(imgInsp, imgInspPath)
@@ -171,6 +170,7 @@ try:
 
     # 8) Full Res MoCo Expiratory
     if os.path.exists(imgMocoPath) is False or ignoreExisting is True:
+        logging.info("Running Full Res MoCo Registration...")
         imgMoco = moco(mrimgPath, diagnosticsDir, nRef=nRef)
         imgMoco = nib.Nifti1Image(imgMoco, np.eye(4))
         nib.save(imgMoco, imgMocoPath)
@@ -178,6 +178,7 @@ try:
 
     # 9) Full Res MoCo Inspiratory
     if os.path.exists(imgMocoInspPath) is False or ignoreExisting is True:
+        logging.info("Running Full Res MoCo Insp Registration...")
         imgMocoInsp = moco(mrimgPath, diagnosticsDir, nRef=0)
         imgMocoInsp = nib.Nifti1Image(imgMocoInsp, np.eye(4))
         nib.save(imgMocoInsp, imgMocoInspPath)
