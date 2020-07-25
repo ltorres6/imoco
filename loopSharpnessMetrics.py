@@ -1,10 +1,9 @@
 import os
+import subprocess
 import logging
 from pathlib import Path
 from writeDicoms import writeDicoms
 
-os.environ["MATLAB_ROOT"] = "/usr/local/matlab2018"
-os.environ["MATLAB_JAVA"] = "/usr/local/java/jre"
 logging.basicConfig(level=logging.INFO)
 rootDir = "/data/data_mrcv2/FAIN_GROUP/FainLab/recon/ipf"
 fileTypes = [
@@ -15,23 +14,9 @@ fileTypes = [
     "PreContrastIterativeMoCo",
     "PreContrastMoCoInsp",
     "PreContrastIterativeMoCoInsp",
-    "PostContrastNoGate",
-    "PostContrastHardGate",
-    "PostContrastSoftGate",
-    "PostContrastMoCo",
-    "PostContrastIterativeMoCo",
-    "PostContrastMoCoInsp",
-    "PostContrastIterativeMoCoInsp",
 
 ]
 fileNames = [
-    "noGate_gw.nii.gz",
-    "hardGate_gw.nii.gz",
-    "softGate_gw.nii.gz",
-    "MoCo_gw.nii.gz",
-    "iMoCo_gw.nii.gz",
-    "MoCo_gw.nii.gz",
-    "iMoCo_gw.nii.gz",
     "noGate_gw.nii.gz",
     "hardGate_gw.nii.gz",
     "softGate_gw.nii.gz",
@@ -45,7 +30,7 @@ subjectList.sort()
 try:
     for ii in subjectList:
         subject = ii
-        if int(subject[4:]) < 43:
+        if int(subject[4:]) == 42:
             print(int(subject[4:]))
             if os.path.exists(os.path.join(rootDir, subject + "/mri/")):
                 visitList = os.listdir(os.path.join(rootDir, subject + "/mri/"))
@@ -71,10 +56,17 @@ try:
                     print("File does not exist.")
                     continue
                 Path(dicomDir).mkdir(parents=True, exist_ok=True)
-
+                pathExist = os.path.isdir(dicomDir)
+                if pathExist is False:
+                os.makedirs(dicomDir)
+                img = nib.load(imgPath).get_fdata()
+                # Convert to uint16
+                img = convert(img, 0, 65535, "uint16")
+                # Orient Properly
+                img = np.flip(np.flip(np.transpose(img, [2, 1, 0]), axis=1), axis=2)
+                
                 # Write Dicoms
-                if not os.path.exists(os.path.join(dicomDir, "0.dcm")):
-                    logging.info("Writing Dicoms...")
-                    writeDicoms(imgPath, dicomDir)
+                logging.info("Writing Dicoms...")
+                writeDicoms(imgPath, dicomDir)
 except KeyboardInterrupt:
     print("interrupted")
