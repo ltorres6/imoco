@@ -83,11 +83,7 @@ try:
     # 1) Convert MRI_Raw.h5 to cfl and read resp waveform.
     logging.info("Running File Conversion...")
     ksp, coord, dcf, resp = convertUTE(h5Path, nCoils)
-    dcf **= 0.5
 
-    logging.info("Kspace Shape: {}...".format(ksp.shape))
-    logging.info("trajectory Shape: {}...".format(coord.shape))
-    logging.info("DCF Shape: {}....".format(dcf.shape))
 
     # 1.5)
     if ksp.shape[0] == 1:

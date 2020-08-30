@@ -6,12 +6,7 @@ from skimage import measure
 import logging
 from normalize import normalize
 import os
-
-# from scipy.misc import imsave
 from PIL import Image
-
-# import sigpy.plot as plt
-# import imageio
 
 
 def getLargestCC(mask):
