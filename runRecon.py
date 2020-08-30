@@ -22,6 +22,7 @@ import time
 import matplotlib.pyplot as plt
 import subprocess
 
+
 def runRecon(subject, visit, imoco_lambda, postfix="", device=0):
     try:
         timei = time.time()
