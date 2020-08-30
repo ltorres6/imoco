@@ -7,6 +7,7 @@ from imoco_e.linop_e import NFTs, Diags, DLD, Vstacks
 from tqdm import trange
 import logging
 import time
+import os
 
 
 def imoco(
@@ -14,7 +15,7 @@ def imoco(
     coord,
     dcf,
     mrimg,
-    fname,
+    diagnosticsPath,
     res_scale=1.0,
     lambda_tv=0.05,
     inner_iter=15,
@@ -117,12 +118,11 @@ def imoco(
             iM_fields.append(iM_field)
         M_fields = np.asarray(M_fields)
         iM_fields = np.asarray(iM_fields)
-        # np.save(fname + "/M_mr.npy", M_fields)
-        # np.save(fname + "/iM_mr.npy", iM_fields)
+        np.save(diagnosticsPath + "/M_mr.npy", M_fields)
+        np.save(diagnosticsPath + "/iM_mr.npy", iM_fields)
     else:
-        pass
-        # M_fields = np.load(fname + "/M_mr.npy")
-        # iM_fields = np.load(fname + "/iM_mr.npy")
+        M_fields = np.load(diagnosticsPath + "/M_mr.npy")
+        iM_fields = np.load(diagnosticsPath + "/iM_mr.npy")
 
     iM_fields = [iM_fields[i] for i in range(iM_fields.shape[0])]
     M_fields = [M_fields[i] for i in range(M_fields.shape[0])]
@@ -185,6 +185,7 @@ def imoco(
     X0 = np.zeros_like(X)
     q = np.zeros((3,) + tshape, dtype=np.complex64)
     pbarOuter = trange(outer_iter, leave=True)
+    lossVal = []
     for ii in pbarOuter:
         timeI = time.time()
         pbarOuter.set_description("iMoco Outer Iter {}".format(ii))
@@ -196,9 +197,12 @@ def imoco(
         pbarOuter.set_postfix(
             loss=np.linalg.norm(X - X0) / np.linalg.norm(X), time=timeF - timeI
         )
+        lossVal.append(np.linalg.norm(X - X0) / np.linalg.norm(X))
         X0 = X
     X = np.transpose(X, (2, 1, 0))
     X = np.flip(X, (0, 1, 2))
+    lossVal = np.array(lossVal)
+    np.save(os.path.join(diagnosticsPath, "loss_frm" + str(nRef) + "_lambda" + str(lambda_tv) + "_res" + str(res_scale)), lossVal)
     timeFinish = time.time()
     logging.info("iMoco Recon Finished in: {} min...".format((timeFinish - timeStart) / 60))
     return X

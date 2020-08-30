@@ -53,6 +53,7 @@ def autofov(ksp, coord, dcf, diagPath, num_ro=100, device=-1, thresh=0.4, radial
         imgc_shape = np.array(sp.estimate_shape(coordc))
         imgc2_shape = sp.estimate_shape(coordc2)
         imgc2_center = [i // 2 for i in imgc2_shape]
+        logging.info("Adjoint Nufft 1")
         imgc2 = sp.nufft_adjoint(
             sp.to_device(dcfc * kspc, device), coordc2, [num_coils] + imgc2_shape
         )
@@ -116,6 +117,7 @@ def autofov(ksp, coord, dcf, diagPath, num_ro=100, device=-1, thresh=0.4, radial
         coordc = sp.to_device(coordc, device)
         num_coils = len(kspc)
         imgc_shape = sp.estimate_shape(coordc)
+        logging.info("Adjoint Nufft 2")
         imgc = sp.nufft_adjoint(sp.to_device(dcfc * kspc, device), coordc, [num_coils] + imgc_shape)
         imgc = xp.sum(xp.abs(imgc) ** 2, axis=0) ** 0.5
         # plt.ImagePlot(imgc)
