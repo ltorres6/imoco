@@ -1,10 +1,9 @@
 import argparse
 import numpy as np
 from scipy.signal import firls, convolve
-import sigpy.plot as plt
 
 
-def estimate_resp(dc, tr, n=9999, fl=0.1, fh=1.5, fw=0.01):
+def estimate_resp(dc, tr, n=9999, fl=0.1, fh=1.5, fw=0.01, usePhase=False):
     """Estimate respiratory signal from DC.
 
     The function performs:
@@ -23,7 +22,11 @@ def estimate_resp(dc, tr, n=9999, fl=0.1, fh=1.5, fw=0.01):
     Returns:
         array: respiratory signal of length num_tr.
     """
-    dc = np.abs(dc)
+    if usePhase is True:
+        dc = np.unwrap(np.angle(dc))
+    else:
+        dc = np.abs(dc)
+
     fs = 1 / tr
     bands = [0, fl - fw, fl, fh, fh + fw, fs / 2]
     desired = [0, 0, 1, 1, 0, 0]

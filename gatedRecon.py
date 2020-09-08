@@ -8,6 +8,7 @@ import logging
 
 
 def gatingWeights(resp, gating_type="hard", percentile=25, decay=1, flip=False):
+    # Should add a detrend option with running mean...
     sigma = 1.4628 * np.median(np.abs(resp - np.median(resp)))
     resp = (resp - np.median(resp)) / sigma
     thresh = np.percentile(resp, percentile)
@@ -28,6 +29,7 @@ def gatedRecon(
     gating_thresh=0.5,
     gating_weight=1.0,
     device=0,
+    flip=False,
 ):
     timeStart = time.time()
     sp.Device(device).use()
@@ -53,21 +55,22 @@ def gatedRecon(
     if gating_type == "none":
         pass
     elif gating_type == "hard":
-        W = gatingWeights(resp, gating_type="hard", percentile=gating_thresh, decay=gating_weight, flip=True)
+        W = gatingWeights(resp, gating_type="hard", percentile=gating_thresh, decay=gating_weight, flip=flip)
         idx = W == 1
         ksp = ksp[:, idx]
         coord = coord[idx]
         dcf = dcf[idx]
-        del W
+        del W, idx
     elif gating_type == "soft":
-        W = gatingWeights(resp, gating_type="soft", percentile=gating_thresh, decay=gating_weight, flip=True)
+        W = gatingWeights(resp, gating_type="soft", percentile=gating_thresh, decay=gating_weight, flip=flip)
         W_correct = np.broadcast_to(W[..., None], W.shape+(ksp.shape[2],))
         dcf = dcf * W_correct
         del W, W_correct
 
     else:
         raise ValueError('Unknown Gating Type.')
-    # reconstruction
+
+    # Reconstruction
     pbarOuter = trange(nCoils, leave=True)
     coord = sp.to_device(coord, device)
     ksp = ksp * (dcf**2)
