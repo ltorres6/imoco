@@ -2,7 +2,7 @@ import argparse
 import numpy as np
 import sigpy as sp
 from scipy import ndimage
-from skimage import measure
+from skimage import measure, transform
 import logging
 from normalize import normalize
 import os
@@ -69,17 +69,17 @@ def autofov(ksp, coord, dcf, diagPath, num_ro=100, device=-1, thresh=0.4, radial
         imgc2 /= imgc2.max()
         # plt.ImagePlot(imgc2)
         imc = normalize(imgc2[:, imgc2.shape[1] // 2, :], 0, 255)
-        imc = Image.fromarray(imc)
+        imc = Image.fromarray(transform.resize(imc, (256,256)))
         imc = imc.convert("L")
         imc.save(diagPath + "/d_lowResCoronal.jpg")
 
         ims = normalize(imgc2[:, :, imgc2.shape[2] // 2], 0, 255)
-        ims = Image.fromarray(ims)
+        ims = Image.fromarray(transform.resize(ims, (256, 256)))
         ims = ims.convert("L")
         ims.save(diagPath + "/d_lowResSaggital.jpg")
 
         ima = normalize(imgc2[imgc2.shape[0] // 2, :, :], 0, 255)
-        ima = Image.fromarray(ima)
+        ima = Image.fromarray(transform.resize(ima, (256, 256)))
         ima = ima.convert("L")
         ima.save(diagPath + "/d_lowResAxial.jpg")
 
@@ -91,17 +91,17 @@ def autofov(ksp, coord, dcf, diagPath, num_ro=100, device=-1, thresh=0.4, radial
         boxc = imgc2 > thresh
         boxc = getLargestCC(boxc)
         imc = boxc[:, boxc.shape[1] // 2, :]
-        imc = Image.fromarray(imc)
+        imc = Image.fromarray(transform.resize(imc, (256, 256)))
         imc = imc.convert("L")
         imc.save(diagPath + "/d_maskCoronal.jpg")
 
         ims = boxc[:, :, boxc.shape[2] // 2]
-        ims = Image.fromarray(ims)
+        ims = Image.fromarray(transform.resize(ims, (256, 256)))
         ims = ims.convert("L")
         ims.save(diagPath + "/d_maskSaggital.jpg")
 
         ima = boxc[boxc.shape[0] // 2, :, :]
-        ima = Image.fromarray(ima)
+        ima = Image.fromarray(transform.resize(ima, (256, 256)))
         ima = ima.convert("L")
         ima.save(diagPath + "/d_maskAxial.jpg")
         boxc_idx = np.nonzero(boxc)
@@ -135,6 +135,7 @@ def autofov(ksp, coord, dcf, diagPath, num_ro=100, device=-1, thresh=0.4, radial
         ima = normalize(imgc[imgc.shape[0] // 2, :, :], 0, 255)
         ima = Image.fromarray(ima)
         ima = ima.convert("L")
+        
         ima.save(diagPath + "/d_effectiveFOVAxial.jpg")
         logging.info("AutoFov Output Shape: {}".format(sp.estimate_shape(coord)))
         logging.info("Scaling Factors: {}".format(img_scale))

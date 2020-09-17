@@ -147,7 +147,7 @@ def runRecon(subject, visit, imoco_lambda, postfix="", device=0):
 
         # 4) hardGating Recon
         if os.path.exists(imgHardGatePath) is False or overWriteHardGating is True:
-            imgHardGate = gatedRecon(ksp, coord, dcf, resp, gating_type="hard", gating_thresh=0.5, device=device, flip=True)
+            imgHardGate = gatedRecon(ksp, coord, dcf, resp, gating_type="hard", gating_thresh=50, device=device, flip=True)
             imgHardGate = sp.resize(np.abs(imgHardGate), (256, 256, 256))
             imgHardGate = nib.Nifti1Image(imgHardGate, np.eye(4))
             nib.save(imgHardGate, imgHardGatePath)
@@ -155,7 +155,7 @@ def runRecon(subject, visit, imoco_lambda, postfix="", device=0):
 
         # 5) softGating Recon
         if os.path.exists(imgSoftGatePath) is False or overWriteSoftGating is True:
-            imgSoftGate = gatedRecon(ksp, coord, dcf, resp, gating_type="soft", gating_thresh=0.25, gating_weight=3, device=device, flip=True)
+            imgSoftGate = gatedRecon(ksp, coord, dcf, resp, gating_type="soft", gating_thresh=25, gating_weight=3, device=device, flip=True)
             imgSoftGate = sp.resize(np.abs(imgSoftGate), (256, 256, 256))
             imgSoftGate = nib.Nifti1Image(imgSoftGate, np.eye(4))
             nib.save(imgSoftGate, imgSoftGatePath)

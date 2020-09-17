@@ -1,6 +1,6 @@
 import os
-cores = "1"
-os.environ["OMP_NUM_THREADS"] = "16"  # export OMP_NUM_THREADS=4
+cores = "12"
+os.environ["OMP_NUM_THREADS"] = cores  # export OMP_NUM_THREADS=4
 os.environ["OPENBLAS_NUM_THREADS"] = cores  # export OPENBLAS_NUM_THREADS=4
 os.environ["MKL_NUM_THREADS"] = cores  # export MKL_NUM_THREADS=6
 os.environ["VECLIB_MAXIMUM_THREADS"] = cores  # export VECLIB_MAXIMUM_THREADS=4
@@ -25,28 +25,33 @@ import subprocess
 
 logging.basicConfig(level=logging.INFO)
 
-rawDir = "/data/users/ltorres/nicu/forNara/Patient95/"
-outDir = "/data/users/ltorres/nicu/forNara/Patient95/reconOut"
+rawDir = "/home/ltorres/data/forNara/Patient153/"
+outDir = "/home/ltorres/data/forNara/Patient153/reconOut"
 
-# rawDir = "/data/users/ltorres/nicu/forNara/Patient137/"
-# outDir = "/data/users/ltorres/nicu/forNara/Patient137/reconOut"
+# rawDir = "/home/ltorres/data/forNara/Patient95/"
+# outDir = "/home/ltorres/data/forNara/Patient95/reconOut"
+
+# rawDir = "/home/ltorres/data/forNara/Patient137/"
+# outDir = "/home/ltorres/data/forNara/Patient137/reconOut"
+
 # set device
 device = 0
 nBins = 6
 nCoils = 8
 postfix = ""
-ignoreExisting = True
 register = 1
 dc_signal = 1
 nRef = -1  # Reference Frame (last ie expiratory)
 xp = sp.Device(device).xp
-imoco_lambda = 0.025
-spokesDSF = 2.0
-fovthresh = 0.15
+spokesDSF = 1.0
+fovthresh = 0.1
 fovNReadout = 70
 # 1.5)
 tr = 0.00502  # nicu
-xdgrasp_lambda = 0.01
+imoco_lambda = 0.015
+xdgrasp_lambda = 0.008
+lowRes_xdgrasp_lambda = xdgrasp_lambda * 0.75
+logging.info("Low Res XDGRASP Lambda: {}".format(lowRes_xdgrasp_lambda))
 tv_device = 0
 
 overWriteNoGating = True
@@ -54,10 +59,10 @@ overWriteHardGating = True
 overWriteSoftGating = True
 overWriteLowRes = True
 overWriteiMoCoExp = True
-overWriteiMoCoInsp = False
+overWriteiMoCoInsp = True
 overWriteHighRes = True
 overWriteMoCoExp = True
-overWriteMoCoInsp = False
+overWriteMoCoInsp = True
 
 try:
     timei = time.time()
@@ -126,7 +131,7 @@ try:
     if dc_signal == 1:
         logging.info("Estimating Resp Waveform from DC signal...")
         logging.info("Using TR: {} seconds".format(tr))
-        # resp = estimate_resp(ksp[:, :, 0], tr, fl=0.25, fh=1.3, fw=0.01, usePhase=usePhase)
+        # resp = estimate_resp(ksp[:, :, 0], tr, fl=0.25, fh=1.2, fw=0.01, usePhase=False)
         resp = estimate_respSavitzkyGolay(ksp[:, :, 0], tr, window=0.8, order=2, detrend_window=10.0, usePhase=False, useDetrend=True)
 
     plt.plot(resp)
@@ -151,7 +156,7 @@ try:
 
     # 3) noGating Recon
     if os.path.exists(imgNoGatePath) is False or overWriteNoGating is True:
-        imgNoGate = gatedRecon(ksp, coord, dcf, resp, gating_type="none", device=device, flip=True)
+        imgNoGate = gatedRecon(ksp, coord, dcf, resp, gating_type="none", device=-1, flip=True)
         imgNoGate = sp.resize(np.abs(imgNoGate), (256, 256, 256))
         imgNoGate = nib.Nifti1Image(imgNoGate, np.eye(4))
         nib.save(imgNoGate, imgNoGatePath)
@@ -159,7 +164,7 @@ try:
 
     # 4) hardGating Recon
     if os.path.exists(imgHardGatePath) is False or overWriteHardGating is True:
-        imgHardGate = gatedRecon(ksp, coord, dcf, resp, gating_type="hard", gating_thresh=0.5, device=device, flip=True)
+        imgHardGate = gatedRecon(ksp, coord, dcf, resp, gating_type="hard", gating_thresh=50, device=-1, flip=True)
         imgHardGate = sp.resize(np.abs(imgHardGate), (256, 256, 256))
         imgHardGate = nib.Nifti1Image(imgHardGate, np.eye(4))
         nib.save(imgHardGate, imgHardGatePath)
@@ -167,7 +172,7 @@ try:
 
     # 5) softGating Recon
     if os.path.exists(imgSoftGatePath) is False or overWriteSoftGating is True:
-        imgSoftGate = gatedRecon(ksp, coord, dcf, resp, gating_type="soft", gating_thresh=0.25, gating_weight=1, device=device, flip=True)
+        imgSoftGate = gatedRecon(ksp, coord, dcf, resp, gating_type="soft", gating_thresh=25, gating_weight=1, device=-1, flip=True)
         imgSoftGate = sp.resize(np.abs(imgSoftGate), (256, 256, 256))
         imgSoftGate = nib.Nifti1Image(imgSoftGate, np.eye(4))
         nib.save(imgSoftGate, imgSoftGatePath)
@@ -181,7 +186,7 @@ try:
     # 7) Low Res xdgrasp recon
     if os.path.exists(mrimgLPath) is False or overWriteLowRes is True:
         logging.info("Running Low Res XDGrasp Reconstruction...")
-        mrimg = xdgrasp(ksp, coord, dcf, res_scale=0.75, lambda_tv=xdgrasp_lambda, device=device, tv_device=tv_device)
+        mrimg = xdgrasp(ksp, coord, dcf, res_scale=0.75, lambda_tv=lowRes_xdgrasp_lambda, device=device, tv_device=tv_device)
         mrimgL = sp.resize(mrimg, (nBins, 192, 192, 192))
         mrimgL = np.moveaxis(np.abs(mrimgL), 0, -1)
         mrimgL = np.transpose(mrimgL, (2, 1, 0, 3))

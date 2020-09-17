@@ -5,6 +5,7 @@ import nibabel as nib
 from tqdm import trange
 import time
 import logging
+# import matplotlib.pyplot as plt
 
 
 def gatingWeights(resp, gating_type="hard", percentile=25, decay=1, flip=False):
@@ -26,7 +27,7 @@ def gatedRecon(
     dcf,
     resp,
     gating_type="none",
-    gating_thresh=0.5,
+    gating_thresh=50,
     gating_weight=1.0,
     device=0,
     flip=False,
@@ -56,6 +57,9 @@ def gatedRecon(
         pass
     elif gating_type == "hard":
         W = gatingWeights(resp, gating_type="hard", percentile=gating_thresh, decay=gating_weight, flip=flip)
+        # plt.plot(resp)
+        # plt.plot(W * resp)
+        # plt.show()
         idx = W == 1
         ksp = ksp[:, idx]
         coord = coord[idx]
@@ -103,7 +107,7 @@ if __name__ == "__main__":
     parser.add_argument("img_file", type=str, help="img out filepath.")
     parser.add_argument("--device", type=int, default=-1, help="Computing device.")
     parser.add_argument("--gating_type", type=str, default="none", help="Gating Type. Options are 'none', 'hard','soft'")
-    parser.add_argument("--gating_thresh", type=float, default=0.5, help="Gating Threshold. Options range from 0.0 to 1.0")
+    parser.add_argument("--gating_thresh", type=float, default=50, help="Gating Threshold. Options range from 0.0 to 1.0")
     parser.add_argument("--gating_weight", type=float, default=1.0, help="Gating weight decay for soft threshold.")
     args = parser.parse_args()
 

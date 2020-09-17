@@ -1,7 +1,7 @@
 import argparse
 import numpy as np
 from scipy.signal import savgol_filter, detrend, medfilt
-
+import matplotlib.pyplot as plt
 
 def estimate_respSavitzkyGolay(dc, tr, window=0.8, order=2, detrend_window=0.8, usePhase=False, useDetrend=False):
     """Estimate respiratory signal from DC.
@@ -39,8 +39,16 @@ def estimate_respSavitzkyGolay(dc, tr, window=0.8, order=2, detrend_window=0.8, 
         detrend_window_length = int(detrend_window / tr)
         if detrend_window_length % 2 == 0:
             detrend_window_length += 1
-        resp_moving_median = medfilt(resp, window_length)
-        resp -= resp_moving_median
+        # resp_moving_median = medfilt(resp, window_length)
+        resp_moving_mean = np.convolve(resp, np.ones((detrend_window_length,))/detrend_window_length, mode='same')
+
+        # plt.plot(resp)
+        # plt.plot(resp_moving_median)
+        # plt.legend()
+        # plt.show()
+        resp -= resp_moving_mean
+        # plt.plot(resp)
+        # plt.show()
         # resp = detrend(resp)
 
     return resp

@@ -5,6 +5,7 @@ from tqdm import trange
 import logging
 import time
 import nibabel as nib
+from scipy.ndimage import median_filter
 
 
 def moco(
@@ -26,7 +27,7 @@ def moco(
         pbar = trange(nPhases, leave=True)
         for ii in pbar:
             pbar.set_description("Registering Frame # {}...".format(ii))
-            M_field, iM_field = reg.ANTsReg(np.abs(mrimg[nRef]), np.abs(mrimg[ii]))
+            M_field, iM_field = reg.ANTsReg(median_filter(np.abs(mrimg[nRef]), 3), median_filter(np.abs(mrimg[ii]), 3))
             M_fields.append(M_field)
             iM_fields.append(iM_field)
         M_fields = np.asarray(M_fields)
