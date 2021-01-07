@@ -1,4 +1,5 @@
 import os
+
 cores = "12"
 os.environ["OMP_NUM_THREADS"] = cores  # export OMP_NUM_THREADS=4
 os.environ["OPENBLAS_NUM_THREADS"] = cores  # export OPENBLAS_NUM_THREADS=4
@@ -11,6 +12,7 @@ from autofov import autofov
 from estimate_resp import estimate_resp
 from estimate_respSavitzkyGolay import estimate_respSavitzkyGolay
 from binMotionStates import binMotionStates
+from bin_motion_states_external import bin_motion_states_weighted
 from xdgrasp import xdgrasp
 from imoco import imoco
 from moco import moco
@@ -25,8 +27,11 @@ import subprocess
 
 logging.basicConfig(level=logging.INFO)
 
-rawDir = "/home/ltorres/data/forNara/Patient153/"
-outDir = "/home/ltorres/data/forNara/Patient153/reconOut"
+rawDir = "/home/ltorres/data/rawdata/nicu/P24/"
+outDir = "/home/ltorres/data/recons/nicu/P24/"
+
+# rawDir = "/home/ltorres/data/forNara/Patient153/"
+# outDir = "/home/ltorres/data/forNara/Patient153/reconOut"
 
 # rawDir = "/home/ltorres/data/forNara/Patient95/"
 # outDir = "/home/ltorres/data/forNara/Patient95/reconOut"
@@ -36,7 +41,7 @@ outDir = "/home/ltorres/data/forNara/Patient153/reconOut"
 
 # set device
 device = 0
-nBins = 6
+nBins = 8
 nCoils = 8
 postfix = ""
 register = 1
@@ -48,15 +53,15 @@ fovthresh = 0.1
 fovNReadout = 70
 # 1.5)
 tr = 0.00502  # nicu
-imoco_lambda = 0.015
+imoco_lambda = 0.02
 xdgrasp_lambda = 0.008
 lowRes_xdgrasp_lambda = xdgrasp_lambda * 0.75
 logging.info("Low Res XDGRASP Lambda: {}".format(lowRes_xdgrasp_lambda))
 tv_device = 0
 
-overWriteNoGating = True
-overWriteHardGating = True
-overWriteSoftGating = True
+overWriteNoGating = False
+overWriteHardGating = False
+overWriteSoftGating = False
 overWriteLowRes = True
 overWriteiMoCoExp = True
 overWriteiMoCoInsp = True
@@ -96,7 +101,7 @@ try:
         pass
     # Set up data paths
     h5Path = os.path.join(rawDir, "MRI_Raw.h5")
-    diagnosticsDir = os.path.join(motionResolvedDir, "diagnostics")
+    diagnosticsDir = os.path.join(outDir, "diagnostics")
     mrimgPath = os.path.join(motionResolvedDir, "MotionResolved.nii.gz")
     mrimgLPath = os.path.join(motionResolvedDir, "MotionResolvedLowRes.nii.gz")
     imgMocoPath = os.path.join(mocoDir, "MoCo.nii.gz")
@@ -131,32 +136,49 @@ try:
     if dc_signal == 1:
         logging.info("Estimating Resp Waveform from DC signal...")
         logging.info("Using TR: {} seconds".format(tr))
-        # resp = estimate_resp(ksp[:, :, 0], tr, fl=0.25, fh=1.2, fw=0.01, usePhase=False)
-        resp = estimate_respSavitzkyGolay(ksp[:, :, 0], tr, window=0.8, order=2, detrend_window=10.0, usePhase=False, useDetrend=True)
+        resp = estimate_resp(ksp[:, :, 0], tr * 2, fl=0.25, fh=1.2, fw=0.01, usePhase=False)
+        # resp = estimate_respSavitzkyGolay(
+        #     ksp[:, :, 0],
+        #     tr,
+        #     window=0.8,
+        #     order=2,
+        #     detrend_window=10.0,
+        #     usePhase=False,
+        #     useDetrend=True,
+        # )
 
     plt.plot(resp)
     plt.title("Entire Waveform")
-    plt.savefig(diagnosticsDir + '/respWaveformFull.png')
+    plt.savefig(diagnosticsDir + "/respWaveformFull.png")
     plt.close()
 
-    plt.plot(resp[int(60 / tr):int(60 / tr) + int(120 / tr)])
+    plt.plot(resp[int(60 / tr) : int(60 / tr) + int(120 / tr)])
     plt.title("120 seconds of breathing")
-    plt.savefig(diagnosticsDir + '/respWaveform120.png')
+    plt.savefig(diagnosticsDir + "/respWaveform120.png")
     plt.close()
 
-    plt.plot(resp[int(60 / tr):int(60 / tr) + int(60 / tr)])
+    plt.plot(resp[int(60 / tr) : int(60 / tr) + int(60 / tr)])
     plt.title("60 seconds of breathing")
-    plt.savefig(diagnosticsDir + '/respWaveform60.png')
+    plt.savefig(diagnosticsDir + "/respWaveform60.png")
     plt.close()
     np.save(respPath, resp)
 
     # 2) AutoFOV to reduce matrix size
     logging.info("Running AutoFOV...")
-    coord = autofov(ksp, coord, dcf ** 2, diagnosticsDir, num_ro=fovNReadout, thresh=fovthresh, device=device, radial=False)
+    coord = autofov(
+        ksp,
+        coord,
+        dcf ** 2,
+        diagnosticsDir,
+        num_ro=fovNReadout,
+        thresh=fovthresh,
+        device=device,
+        radial=False,
+    )
 
     # 3) noGating Recon
     if os.path.exists(imgNoGatePath) is False or overWriteNoGating is True:
-        imgNoGate = gatedRecon(ksp, coord, dcf, resp, gating_type="none", device=-1, flip=True)
+        imgNoGate = gatedRecon(ksp, coord, dcf, resp, gating_type="none", device=device, flip=True)
         imgNoGate = sp.resize(np.abs(imgNoGate), (256, 256, 256))
         imgNoGate = nib.Nifti1Image(imgNoGate, np.eye(4))
         nib.save(imgNoGate, imgNoGatePath)
@@ -164,7 +186,9 @@ try:
 
     # 4) hardGating Recon
     if os.path.exists(imgHardGatePath) is False or overWriteHardGating is True:
-        imgHardGate = gatedRecon(ksp, coord, dcf, resp, gating_type="hard", gating_thresh=50, device=-1, flip=True)
+        imgHardGate = gatedRecon(
+            ksp, coord, dcf, resp, gating_type="hard", gating_thresh=50, device=device, flip=True
+        )
         imgHardGate = sp.resize(np.abs(imgHardGate), (256, 256, 256))
         imgHardGate = nib.Nifti1Image(imgHardGate, np.eye(4))
         nib.save(imgHardGate, imgHardGatePath)
@@ -172,7 +196,17 @@ try:
 
     # 5) softGating Recon
     if os.path.exists(imgSoftGatePath) is False or overWriteSoftGating is True:
-        imgSoftGate = gatedRecon(ksp, coord, dcf, resp, gating_type="soft", gating_thresh=25, gating_weight=1, device=-1, flip=True)
+        imgSoftGate = gatedRecon(
+            ksp,
+            coord,
+            dcf,
+            resp,
+            gating_type="soft",
+            gating_thresh=25,
+            gating_weight=1,
+            device=-device,
+            flip=True,
+        )
         imgSoftGate = sp.resize(np.abs(imgSoftGate), (256, 256, 256))
         imgSoftGate = nib.Nifti1Image(imgSoftGate, np.eye(4))
         nib.save(imgSoftGate, imgSoftGatePath)
@@ -180,13 +214,21 @@ try:
 
     # 6) Bin Motion States
     logging.info("Running BinMotionStates...")
-    ksp, coord, dcf = binMotionStates(ksp, coord, dcf, resp, nBins)
-    del resp  # not needed anymore
+    # ksp, coord, dcf = binMotionStates(ksp, coord, dcf, resp, nBins)
+    ksp, coord, dcf = bin_motion_states_weighted(ksp, coord, dcf, resp, nBins, winsor=True)
 
     # 7) Low Res xdgrasp recon
     if os.path.exists(mrimgLPath) is False or overWriteLowRes is True:
         logging.info("Running Low Res XDGrasp Reconstruction...")
-        mrimg = xdgrasp(ksp, coord, dcf, res_scale=0.75, lambda_tv=lowRes_xdgrasp_lambda, device=device, tv_device=tv_device)
+        mrimg = xdgrasp(
+            ksp,
+            coord,
+            dcf,
+            res_scale=0.75,
+            lambda_tv=lowRes_xdgrasp_lambda,
+            device=device,
+            tv_device=tv_device,
+        )
         mrimgL = sp.resize(mrimg, (nBins, 192, 192, 192))
         mrimgL = np.moveaxis(np.abs(mrimgL), 0, -1)
         mrimgL = np.transpose(mrimgL, (2, 1, 0, 3))
@@ -198,7 +240,20 @@ try:
     # 8) iMoCo recon expir
     if os.path.exists(imgPath) is False or overWriteiMoCoExp is True:
         logging.info("Running iMoCo Reconstruction...")
-        img = imoco(ksp, coord, dcf, mrimg, diagnosticsDir, res_scale=1.0, lambda_tv=imoco_lambda, inner_iter=15, outer_iter=20, device=device, nRef=nRef, reg_flag=register)
+        img = imoco(
+            ksp,
+            coord,
+            dcf,
+            mrimg,
+            diagnosticsDir,
+            res_scale=1.0,
+            lambda_tv=imoco_lambda,
+            inner_iter=15,
+            outer_iter=20,
+            device=device,
+            nRef=nRef,
+            reg_flag=register,
+        )
         img = sp.resize(np.abs(img), (256, 256, 256))
         img = nib.Nifti1Image(img, np.eye(4))
         nib.save(img, imgPath)
@@ -207,7 +262,20 @@ try:
     # 9) iMoCo recon Insp
     if os.path.exists(imgInspPath) is False or overWriteiMoCoInsp is True:
         logging.info("Running iMoCo Inspiratory Reconstruction...")
-        imgInsp = imoco(ksp, coord, dcf, mrimg, diagnosticsDir, res_scale=1.0, lambda_tv=imoco_lambda, inner_iter=15, outer_iter=20, device=device, nRef=0, reg_flag=register)
+        imgInsp = imoco(
+            ksp,
+            coord,
+            dcf,
+            mrimg,
+            diagnosticsDir,
+            res_scale=1.0,
+            lambda_tv=imoco_lambda,
+            inner_iter=15,
+            outer_iter=20,
+            device=device,
+            nRef=0,
+            reg_flag=register,
+        )
         imgInsp = sp.resize(np.abs(imgInsp), (256, 256, 256))
         imgInsp = nib.Nifti1Image(imgInsp, np.eye(4))
         nib.save(imgInsp, imgInspPath)
@@ -216,7 +284,15 @@ try:
     # 10) Full Res xdgrasp recon
     if os.path.exists(mrimgPath) is False or overWriteHighRes is True:
         logging.info("Running Full Res XDGrasp Reconstruction...")
-        mrimg = xdgrasp(ksp, coord, dcf, res_scale=1.0, lambda_tv=xdgrasp_lambda, device=device, tv_device=tv_device)
+        mrimg = xdgrasp(
+            ksp,
+            coord,
+            dcf,
+            res_scale=1.0,
+            lambda_tv=xdgrasp_lambda,
+            device=device,
+            tv_device=tv_device,
+        )
         mrimg = sp.resize(mrimg, (nBins, 256, 256, 256))
         mrimg = np.moveaxis(np.abs(mrimg), 0, -1)
         mrimg = np.transpose(mrimg, (2, 1, 0, 3))

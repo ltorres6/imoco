@@ -9,6 +9,7 @@ import logging
 import time
 import os
 from scipy.ndimage import median_filter
+import nibabel as nib
 
 
 def imoco(
@@ -55,7 +56,7 @@ def imoco(
     mps = mr.app.JsenseRecon(
         ksp[0],
         coord=coord[0],
-        weights=dcf[0]**2,
+        weights=dcf[0] ** 2,
         mps_ker_width=12,
         ksp_calib_width=32,
         lamda=0,
@@ -116,24 +117,52 @@ def imoco(
         pbar = trange(nPhases, leave=True)
         for ii in pbar:
             pbar.set_description("Registering Frame # {}...".format(ii))
-            M_field, iM_field = reg.ANTsReg(median_filter(np.abs(mrimg[nRef]), 3), median_filter(np.abs(mrimg[ii]), 3))
+            M_field, iM_field = reg.ANTsReg(
+                median_filter(np.abs(mrimg[nRef]), 3), median_filter(np.abs(mrimg[ii]), 3)
+            )
             M_fields.append(M_field)
             iM_fields.append(iM_field)
         M_fields = np.asarray(M_fields)
         iM_fields = np.asarray(iM_fields)
-        np.save(diagnosticsPath + "/M_mr.npy", M_fields)
-        np.save(diagnosticsPath + "/iM_mr.npy", iM_fields)
+        # np.save(diagnosticsPath + "/M_mr.npy", M_fields)
+        # np.save(diagnosticsPath + "/iM_mr.npy", iM_fields)
+        # M_fields = np.load(diagnosticsPath + "/M_mr.npy")
+        # iM_fields = np.load(diagnosticsPath + "/iM_mr.npy")
+
+        iM_fields = [iM_fields[i] for i in range(iM_fields.shape[0])]
+        M_fields = [M_fields[i] for i in range(M_fields.shape[0])]
+
+        # Scale Motion field (multply values by scale and expand by scale)
+        logging.info("Motion Field scaling...")
+        M_fields = [reg.M_scale(M, tshape) for M in M_fields]
+        iM_fields = [reg.M_scale(M, tshape) for M in iM_fields]
+
+        logging.info("Saving Motion Fields as nii...")
+        tmp = np.asarray(M_fields)
+        print(tmp.shape)
+        tmp = np.moveaxis(tmp, 0, -1)
+        tmp = np.transpose(tmp, (2, 1, 0, 3, 4))
+        tmp = np.flip(tmp, (0, 1, 2))
+        tmp = nib.Nifti1Image(tmp, np.eye(4))
+        nib.save(tmp, diagnosticsPath + "/M_mr.nii.gz")
+
+        tmp = np.asarray(iM_fields)
+        print(tmp.shape)
+        tmp = np.moveaxis(tmp, 0, -1)
+        tmp = np.transpose(tmp, (2, 1, 0, 3, 4))
+        tmp = np.flip(tmp, (0, 1, 2))
+        tmp = nib.Nifti1Image(tmp, np.eye(4))
+        nib.save(tmp, diagnosticsPath + "/iM_mr.nii.gz")
+        del tmp
     else:
-        M_fields = np.load(diagnosticsPath + "/M_mr.npy")
-        iM_fields = np.load(diagnosticsPath + "/iM_mr.npy")
+        logging.info("Reading Motion Fields from disk...")
+        M_fields = nib.load(diagnosticsPath + "/M_mr.nii.gz").get_fdata()
+        M_fields = np.flip(M_fields, (0, 1, 2))
+        M_fields = np.transpose(M_fields, (2, 1, 0, 3, 4))
 
-    iM_fields = [iM_fields[i] for i in range(iM_fields.shape[0])]
-    M_fields = [M_fields[i] for i in range(M_fields.shape[0])]
-
-    # Scale Motion field (multply values by scale and expand by scale)
-    logging.info("Motion Field scaling...")
-    M_fields = [reg.M_scale(M, tshape) for M in M_fields]
-    iM_fields = [reg.M_scale(M, tshape) for M in iM_fields]
+        iM_fields = nib.load(diagnosticsPath + "/iM_mr.nii.gz").get_fdata()
+        iM_fields = np.flip(iM_fields, (0, 1, 2))
+        iM_fields = np.transpose(iM_fields, (2, 1, 0, 3, 4))
 
     # Recon
     logging.info("Prep...")
@@ -156,12 +185,29 @@ def imoco(
         FTs = NFTs((nCoils,) + tshape, coord[i], device=sp.Device(device))
         M = reg.interp_op(tshape, iM_fields[i])
         M = DLD(M, device=sp.Device(device))
-        W = sp.linop.Multiply((nCoils, nSpokes, nReadouts,), dcf[i])
+        W = sp.linop.Multiply(
+            (
+                nCoils,
+                nSpokes,
+                nReadouts,
+            ),
+            dcf[i],
+        )
         FTSM = W * FTs * S * M
         PFTSMs.append(FTSM)
-    PFTSMs = Diags(
-        PFTSMs, oshape=(nPhases, nCoils, nSpokes, nReadouts,), ishape=(nPhases,) + tshape
-    ) * Vstacks(Is, ishape=tshape, oshape=(nPhases,) + tshape)
+    PFTSMs = (
+        Diags(
+            PFTSMs,
+            oshape=(
+                nPhases,
+                nCoils,
+                nSpokes,
+                nReadouts,
+            ),
+            ishape=(nPhases,) + tshape,
+        )
+        * Vstacks(Is, ishape=tshape, oshape=(nPhases,) + tshape)
+    )
 
     # precondition
     logging.info("Preconditioner calculation...")
@@ -197,15 +243,19 @@ def imoco(
         q = q / (np.maximum(np.abs(q), alpha) / alpha)
         X = X - tau * (1 / L * PFTSMs.H * p + lambda_tv * TV.H * q)
         timeF = time.time()
-        pbarOuter.set_postfix(
-            loss=np.linalg.norm(X - X0) / np.linalg.norm(X), time=timeF - timeI
-        )
+        pbarOuter.set_postfix(loss=np.linalg.norm(X - X0) / np.linalg.norm(X), time=timeF - timeI)
         lossVal.append(np.linalg.norm(X - X0) / np.linalg.norm(X))
         X0 = X
     X = np.transpose(X, (2, 1, 0))
     X = np.flip(X, (0, 1, 2))
     lossVal = np.array(lossVal)
-    np.save(os.path.join(diagnosticsPath, "loss_frm" + str(nRef) + "_lambda" + str(lambda_tv) + "_res" + str(res_scale)), lossVal)
+    np.save(
+        os.path.join(
+            diagnosticsPath,
+            "loss_frm" + str(nRef) + "_lambda" + str(lambda_tv) + "_res" + str(res_scale),
+        ),
+        lossVal,
+    )
     timeFinish = time.time()
     logging.info("iMoco Recon Finished in: {} min...".format((timeFinish - timeStart) / 60))
     return X

@@ -5,6 +5,7 @@ import nibabel as nib
 from tqdm import trange
 import time
 import logging
+
 # import matplotlib.pyplot as plt
 
 
@@ -56,7 +57,9 @@ def gatedRecon(
     if gating_type == "none":
         pass
     elif gating_type == "hard":
-        W = gatingWeights(resp, gating_type="hard", percentile=gating_thresh, decay=gating_weight, flip=flip)
+        W = gatingWeights(
+            resp, gating_type="hard", percentile=gating_thresh, decay=gating_weight, flip=flip
+        )
         # plt.plot(resp)
         # plt.plot(W * resp)
         # plt.show()
@@ -66,18 +69,20 @@ def gatedRecon(
         dcf = dcf[idx]
         del W, idx
     elif gating_type == "soft":
-        W = gatingWeights(resp, gating_type="soft", percentile=gating_thresh, decay=gating_weight, flip=flip)
-        W_correct = np.broadcast_to(W[..., None], W.shape+(ksp.shape[2],))
+        W = gatingWeights(
+            resp, gating_type="soft", percentile=gating_thresh, decay=gating_weight, flip=flip
+        )
+        W_correct = np.broadcast_to(W[..., None], W.shape + (ksp.shape[2],))
         dcf = dcf * W_correct
         del W, W_correct
 
     else:
-        raise ValueError('Unknown Gating Type.')
+        raise ValueError("Unknown Gating Type.")
 
     # Reconstruction
     pbarOuter = trange(nCoils, leave=True)
     coord = sp.to_device(coord, device)
-    ksp = ksp * (dcf**2)
+    ksp = ksp * (dcf ** 2)
     with sp.Device(device):
         img = 0
         for c in pbarOuter:
@@ -85,7 +90,7 @@ def gatedRecon(
             pbarOuter.set_description("Reconstructing Coil # {}".format(c))
             ksp_c = sp.to_device(ksp[c], device)
             img_c = sp.nufft_adjoint(ksp_c, coord, oshape=img_shape)
-            img += sp.to_device(xp.abs(img_c**2))
+            img = img + sp.to_device(xp.abs(img_c ** 2), -1)
             pbarOuter.set_postfix(time=(time.time() - timeI) / 60)
         img = img ** 0.5
 
@@ -106,9 +111,21 @@ if __name__ == "__main__":
     parser.add_argument("resp_file", type=str, help="resp. waveform file.")
     parser.add_argument("img_file", type=str, help="img out filepath.")
     parser.add_argument("--device", type=int, default=-1, help="Computing device.")
-    parser.add_argument("--gating_type", type=str, default="none", help="Gating Type. Options are 'none', 'hard','soft'")
-    parser.add_argument("--gating_thresh", type=float, default=50, help="Gating Threshold. Options range from 0.0 to 1.0")
-    parser.add_argument("--gating_weight", type=float, default=1.0, help="Gating weight decay for soft threshold.")
+    parser.add_argument(
+        "--gating_type",
+        type=str,
+        default="none",
+        help="Gating Type. Options are 'none', 'hard','soft'",
+    )
+    parser.add_argument(
+        "--gating_thresh",
+        type=float,
+        default=50,
+        help="Gating Threshold. Options range from 0.0 to 1.0",
+    )
+    parser.add_argument(
+        "--gating_weight", type=float, default=1.0, help="Gating weight decay for soft threshold."
+    )
     args = parser.parse_args()
 
     # Read in data
