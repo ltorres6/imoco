@@ -1,6 +1,7 @@
 import numpy as np
 
 
-def normalize(I_in, minv, maxv):
-    out = (maxv - minv) * (I_in - np.min(I_in[:])) / (np.max(I_in[:]) - np.min(I_in[:])) + minv
+def normalize(input, minv, maxv):
+    original = input.copy()
+    out = (maxv - minv) * (original - np.min(original[:])) / (np.max(original[:]) - np.min(original[:])) + minv
     return out

@@ -16,7 +16,7 @@ def getLargestCC(mask):
     return largestCC
 
 
-def autofov(ksp, coord, dcf, diagPath, num_ro=100, device=-1, thresh=0.4, radial=False):
+def autofov(ksp, coord, dcf, diagnostics_dir, num_ro=100, device=-1, thresh=0.4, radial=False):
     """Automatic estimation of FOV.
 
     FOV is estimated by thresholding a low resolution gridded image.
@@ -54,9 +54,7 @@ def autofov(ksp, coord, dcf, diagPath, num_ro=100, device=-1, thresh=0.4, radial
         imgc2_shape = sp.estimate_shape(coordc2)
         imgc2_center = [i // 2 for i in imgc2_shape]
         logging.info("Adjoint Nufft 1")
-        imgc2 = sp.nufft_adjoint(
-            sp.to_device(dcfc * kspc, device), coordc2, [num_coils] + imgc2_shape
-        )
+        imgc2 = sp.nufft_adjoint(sp.to_device(dcfc * kspc, device), coordc2, [num_coils] + imgc2_shape)
         imgc2 = xp.sum(xp.abs(imgc2) ** 2, axis=0) ** 0.5
         imgc2 = sp.to_device(imgc2)
         # Filter image?-----------------------
@@ -69,19 +67,19 @@ def autofov(ksp, coord, dcf, diagPath, num_ro=100, device=-1, thresh=0.4, radial
         imgc2 /= imgc2.max()
         # plt.ImagePlot(imgc2)
         imc = normalize(imgc2[:, imgc2.shape[1] // 2, :], 0, 255)
-        imc = Image.fromarray(transform.resize(imc, (256,256)))
+        imc = Image.fromarray(transform.resize(imc, (256, 256)))
         imc = imc.convert("L")
-        imc.save(diagPath + "/d_lowResCoronal.jpg")
+        imc.save(diagnostics_dir + "autofov_lowResCoronal.jpg")
 
         ims = normalize(imgc2[:, :, imgc2.shape[2] // 2], 0, 255)
         ims = Image.fromarray(transform.resize(ims, (256, 256)))
         ims = ims.convert("L")
-        ims.save(diagPath + "/d_lowResSaggital.jpg")
+        ims.save(diagnostics_dir + "autofov_lowResSaggital.jpg")
 
         ima = normalize(imgc2[imgc2.shape[0] // 2, :, :], 0, 255)
         ima = Image.fromarray(transform.resize(ima, (256, 256)))
         ima = ima.convert("L")
-        ima.save(diagPath + "/d_lowResAxial.jpg")
+        ima.save(diagnostics_dir + "autofov_lowResAxial.jpg")
 
         # if imgc2.ndim == 3:
         #     imgc2_cor = imgc2[:, imgc2.shape[1] // 2, :]
@@ -89,25 +87,23 @@ def autofov(ksp, coord, dcf, diagPath, num_ro=100, device=-1, thresh=0.4, radial
         # else:
         thresh *= imgc2.max()
         boxc = imgc2 > thresh
-        boxc = getLargestCC(boxc)
-        imc = boxc[:, boxc.shape[1] // 2, :]
+        boxc = getLargestCC(boxc).astype(float)
+        imc = normalize(boxc[:, boxc.shape[1] // 2, :], 0, 255)
         imc = Image.fromarray(transform.resize(imc, (256, 256)))
-        imc = imc.convert("L")
-        imc.save(diagPath + "/d_maskCoronal.jpg")
+        imc = imc.convert("1")
+        imc.save(diagnostics_dir + "autofov_maskCoronal.jpg")
 
-        ims = boxc[:, :, boxc.shape[2] // 2]
+        ims = normalize(boxc[:, :, boxc.shape[2] // 2], 0, 255)
         ims = Image.fromarray(transform.resize(ims, (256, 256)))
-        ims = ims.convert("L")
-        ims.save(diagPath + "/d_maskSaggital.jpg")
+        ims = ims.convert("1")
+        ims.save(diagnostics_dir + "autofov_maskSaggital.jpg")
 
-        ima = boxc[boxc.shape[0] // 2, :, :]
+        ima = normalize(boxc[boxc.shape[0] // 2, :, :], 0, 255)
         ima = Image.fromarray(transform.resize(ima, (256, 256)))
-        ima = ima.convert("L")
-        ima.save(diagPath + "/d_maskAxial.jpg")
+        ima = ima.convert("1")
+        ima.save(diagnostics_dir + "autofov_maskAxial.jpg")
         boxc_idx = np.nonzero(boxc)
-        boxc_shape = np.array(
-            [int(np.abs(boxc_idx[i] - imgc2_center[i]).max()) * 2 for i in range(imgc2.ndim)]
-        )
+        boxc_shape = np.array([int(np.abs(boxc_idx[i] - imgc2_center[i]).max()) * 2 for i in range(imgc2.ndim)])
         img_scale = boxc_shape / imgc_shape
         if radial:
             img_scale *= 2
@@ -123,23 +119,23 @@ def autofov(ksp, coord, dcf, diagPath, num_ro=100, device=-1, thresh=0.4, radial
         # plt.ImagePlot(imgc)
         imgc = sp.to_device(xp.abs(imgc))
         imc = normalize(imgc[:, imgc.shape[1] // 2, :], 0, 255)
-        imc = Image.fromarray(imc)
+        imc = Image.fromarray(transform.resize(imc, (256, 256)))
         imc = imc.convert("L")
-        imc.save(diagPath + "/d_effectiveFOVCoronal.jpg")
+        imc.save(diagnostics_dir + "autofov_croppedCoronal.jpg")
 
         ims = normalize(imgc[:, :, imgc.shape[2] // 2], 0, 255)
-        ims = Image.fromarray(ims)
+        ims = Image.fromarray(transform.resize(ims, (256, 256)))
         ims = ims.convert("L")
-        ims.save(diagPath + "/d_effectiveFOVSaggital.jpg")
+        ims.save(diagnostics_dir + "autofov_croppedSaggital.jpg")
 
         ima = normalize(imgc[imgc.shape[0] // 2, :, :], 0, 255)
-        ima = Image.fromarray(ima)
+        ima = Image.fromarray(transform.resize(ima, (256, 256)))
         ima = ima.convert("L")
-        
-        ima.save(diagPath + "/d_effectiveFOVAxial.jpg")
+        ima.save(diagnostics_dir + "autofov_croppedAxial.jpg")
+
         logging.info("AutoFov Output Shape: {}".format(sp.estimate_shape(coord)))
         logging.info("Scaling Factors: {}".format(img_scale))
-        np.save(diagPath + "/fovScaleFactors.npy", img_scale)
+        np.savetxt(diagnostics_dir + "fovScaleFactors.txt", img_scale)
 
         # --------------------
         return coord
@@ -173,7 +169,7 @@ if __name__ == "__main__":
         ksp,
         coord,
         dcf,
-        diagPath=args.diagnosticsDir,
+        diagnostics_dir=args.diagnosticsDir,
         num_ro=args.num_ro,
         device=args.device,
         thresh=args.thresh,

@@ -7,12 +7,24 @@ from imoco_e.linop_e import NFTs, Diags
 from tqdm import trange
 import time
 import logging
+import os
+from pathlib import Path
+import copy
+
+
+def save_slice(img, save_dir):
+    img_save = np.squeeze(np.abs(sp.to_device(img[:, img.shape[1] // 2, :])))
+    imgShapeString = "_".join(map(str, img_save.shape[::-1])) + "Shape.dat"
+    with open(save_dir + "iter_slices" + imgShapeString, "ab") as f:
+        f.write(img_save.tobytes())
+    del img_save
 
 
 def xdgrasp(
-    ksp,
-    coord,
-    dcf,
+    ksp_in,
+    coord_in,
+    dcf_in,
+    diagnostics_base_path,
     res_scale=1.0,
     lambda_tv=0.05,
     inner_iter=10,
@@ -27,20 +39,36 @@ def xdgrasp(
         logging.info("Using GPU...")
     else:
         logging.info("Using CPU...")
+    save_iter_slice = True
 
-    logging.info("Kspace Shape: {}...".format(ksp.shape))
-    logging.info("trajectory Shape: {}...".format(coord.shape))
-    logging.info("DCF Shape: {}....".format(dcf.shape))
+    # Copy input data
+    ksp = copy.deepcopy(ksp_in)
+    coord = copy.deepcopy(coord_in)
+    dcf = copy.deepcopy(dcf_in)
 
-    nf_arr = np.sqrt(np.sum(coord[0, 0, :, :] ** 2, axis=1))
+    # As lists, list has len of n_bins
+    # (n_bins, n_coils, n_projections, n_readouts)
+    logging.info("Kspace Shape: {}...".format(ksp[0].shape))
+    # (n_bins, n_projections, n_readouts, n_dim)
+    logging.info("trajectory Shape: {}...".format(coord[0].shape))
+    # (n_bins, n_projections, n_readouts)
+    logging.info("DCF Shape: {}....".format(dcf[0].shape))
+
+    nf_arr = np.sqrt(np.sum(coord[0][0, :, :] ** 2, axis=1))
     nReadouts = np.sum(nf_arr < np.max(nf_arr) * res_scale)
     del nf_arr
 
-    coord = coord[..., :nReadouts, :]
-    ksp = ksp[..., :nReadouts]
-    dcf = dcf[..., :nReadouts]
-    logging.info("Image Shape Estimate: {}".format(sp.estimate_shape(coord)))
-    nPhases, nCoils, nSpokes, nReadouts = ksp.shape
+    ksp = [bin_data[..., :nReadouts] for bin_data in ksp]
+    coord = [bin_data[:, :nReadouts, :] for bin_data in coord]
+    dcf = [bin_data[..., :nReadouts] for bin_data in dcf]
+
+    logging.info("Image Shape Estimate: {}".format(sp.estimate_shape(coord[0])))
+    nPhases = len(ksp)
+    nCoils, nSpokes, nReadouts = ksp[0].shape
+
+    # Make a dedicated diagnostics directory
+    diagnostics_dir = "{}/diagnostics/".format(Path(diagnostics_base_path))
+    Path(diagnostics_dir).mkdir(parents=True, exist_ok=True)
 
     # calibration
     logging.info("Running calibration...")
@@ -48,7 +76,7 @@ def xdgrasp(
     mps = mr.app.JsenseRecon(
         ksp[0],
         coord=coord[0],
-        weights=dcf[0]**2,
+        weights=dcf[0] ** 2,
         mps_ker_width=12,
         ksp_calib_width=32,
         lamda=0,
@@ -62,47 +90,85 @@ def xdgrasp(
     tshape = mps.shape[1:]
     S = sp.linop.Multiply(tshape, mps)
     del mps
+
     logging.info("Image Shape: {}....".format(tshape))
     logging.info("Computing Linops...")
     PFTSs = []
     for ii in trange(nPhases, desc="Motion Phases"):
-        FTs = NFTs((nCoils,)+tshape, coord[ii], device=sp.Device(device))
-        W = sp.linop.Multiply((nCoils, nSpokes, nReadouts,), dcf[ii])
-        FTSs = W*FTs*S
+        FTs = NFTs((nCoils,) + tshape, coord[ii], device=sp.Device(device))
+        W = sp.linop.Multiply(
+            (
+                nCoils,
+                dcf[ii].shape[0],
+                nReadouts,
+            ),
+            dcf[ii],
+        )
+        FTSs = W * FTs * S
         PFTSs.append(FTSs)
-    PFTSs = Diags(PFTSs, oshape=(nPhases, nCoils, nSpokes, nReadouts,), ishape=(nPhases,) + tshape)
+    # PFTSs = Diags(
+    #     PFTSs,
+    #     oshape=(
+    #         nPhases,
+    #         nCoils,
+    #         nSpokes,
+    #         nReadouts,
+    #     ),
+    #     ishape=(nPhases,) + tshape,
+    # )
 
     logging.info("Computing Preconditioner...")
     timeI = time.time()
-    L = PFTSs.H * PFTSs * np.complex64(np.ones((nPhases,) + tshape))
-    L = np.mean(np.abs(L))
+    L = 0
+    for p in range(nPhases):
+        L += np.sum(np.abs(PFTSs[p].H * PFTSs[p] * np.complex64(np.ones(tshape))))
+        # L = np.mean(np.abs(L))
+    L = L / (np.prod(tshape) * nPhases)
     timeF = time.time()
     logging.info("Preconditioner Value: {}".format(L))
     logging.info("Time for preconditioner: {} seconds.".format(timeF - timeI))
 
     # reconstruction
-    dcf = dcf[:, xp.newaxis, ...]
+    # Apply density compensation
+    for p in range(nPhases):
+        for c in range(nCoils):
+            ksp[p][c] = ksp[p][c] * dcf[p]
+    # dcf = dcf[:, xp.newaxis, ...]
     # plt.ImagePlot(ksp)
-    ksp = ksp * dcf
+    # ksp = ksp * dcf
     # plt.ImagePlot(ksp)
     img = np.zeros((nPhases,) + tshape, dtype=np.complex64)
-    Y = np.zeros_like(ksp)
+    Y = [np.zeros_like(k) for k in ksp]
     img_0 = np.zeros_like(img)
     tau = 0.4
     sigma = 0.4
     logging.info("Running XD-Grasp")
     pbarOuter = trange(outer_iter, leave=True)
+    cost_loss = []
     for ii in pbarOuter:
         timeI = time.time()
         pbarOuter.set_description("XD-Grasp Outer Iter {}".format(ii))
-        Y = (Y + sigma*(1/L*PFTSs*img-ksp))/(1+sigma)
-        img = np.complex64(ext.TVt_prox(img-tau*PFTSs.H*Y, lambda_tv))
+        # Save a slice for diagnostics
+        if save_iter_slice:
+            save_slice(img[0], diagnostics_dir)
+        for p in range(nPhases):
+            Y[p] = (Y[p] + sigma * (1 / L * PFTSs[p] * img[p] - ksp[p])) / (1 + sigma)
+            img[p] = img[p] - tau * PFTSs[p].H * Y[p]
+        img = np.complex64(ext.TVt_prox(img, lambda_tv))
         timeF = time.time()
-        pbarOuter.set_postfix(
-            loss=np.linalg.norm(img - img_0) / np.linalg.norm(img), time=timeF - timeI
-        )
-        img_0 = img
+        pbarOuter.set_postfix(loss=np.linalg.norm(img - img_0) / np.linalg.norm(img), time=timeF - timeI)
+        cost_loss.append(np.linalg.norm(img - img_0) / np.linalg.norm(img))
+        img_0 = img.copy()
+
     timeFinish = time.time()
+    cost_loss = np.array(cost_loss)
+    np.savetxt(
+        os.path.join(
+            diagnostics_dir,
+            "xdgrasp_loss_lambda" + str(lambda_tv) + "_res" + str(res_scale) + ".txt",
+        ),
+        cost_loss,
+    )
     logging.info("XDGrasp Recon Finished in: {} min...".format((timeFinish - timeStart) / 60))
     return sp.to_device(img)
 

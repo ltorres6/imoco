@@ -5,6 +5,7 @@ import nibabel as nib
 from tqdm import trange
 import time
 import logging
+import copy
 
 # import matplotlib.pyplot as plt
 
@@ -23,10 +24,10 @@ def gatingWeights(resp, gating_type="hard", percentile=25, decay=1, flip=False):
 
 
 def gatedRecon(
-    ksp,
-    coord,
-    dcf,
-    resp,
+    ksp_in,
+    coord_in,
+    dcf_in,
+    resp_in,
     gating_type="none",
     gating_thresh=50,
     gating_weight=1.0,
@@ -41,6 +42,12 @@ def gatedRecon(
     else:
         logging.info("Using CPU...")
 
+    # Copy input data
+    ksp = copy.deepcopy(ksp_in)
+    coord = copy.deepcopy(coord_in)
+    dcf = copy.deepcopy(dcf_in)
+    resp = copy.deepcopy(resp_in)
+
     logging.info("Kspace Shape: {}...".format(ksp.shape))
     logging.info("trajectory Shape: {}...".format(coord.shape))
     logging.info("DCF Shape: {}....".format(dcf.shape))
@@ -51,15 +58,13 @@ def gatedRecon(
     img_shape = sp.estimate_shape(coord)
     logging.info("Image Shape: {}....".format(img_shape))
 
-    logging.info("Running Gated Recon")
+    logging.info("Running Gated Recon Type:{}".format(gating_type))
 
     # Respiratory Gating
     if gating_type == "none":
         pass
     elif gating_type == "hard":
-        W = gatingWeights(
-            resp, gating_type="hard", percentile=gating_thresh, decay=gating_weight, flip=flip
-        )
+        W = gatingWeights(resp, gating_type="hard", percentile=gating_thresh, decay=gating_weight, flip=flip)
         # plt.plot(resp)
         # plt.plot(W * resp)
         # plt.show()
@@ -69,9 +74,7 @@ def gatedRecon(
         dcf = dcf[idx]
         del W, idx
     elif gating_type == "soft":
-        W = gatingWeights(
-            resp, gating_type="soft", percentile=gating_thresh, decay=gating_weight, flip=flip
-        )
+        W = gatingWeights(resp, gating_type="soft", percentile=gating_thresh, decay=gating_weight, flip=flip)
         W_correct = np.broadcast_to(W[..., None], W.shape + (ksp.shape[2],))
         dcf = dcf * W_correct
         del W, W_correct
@@ -96,7 +99,7 @@ def gatedRecon(
 
     timeFinish = time.time()
     logging.info("Recon Finished in: {} min...".format((timeFinish - timeStart) / 60))
-    del img_c, ksp_c, dcf, coord
+    del img_c, ksp_c, dcf, coord, ksp
     img = np.transpose(img, (2, 1, 0))
     img = np.flip(img, (0, 1, 2))
     return img
@@ -123,9 +126,7 @@ if __name__ == "__main__":
         default=50,
         help="Gating Threshold. Options range from 0.0 to 1.0",
     )
-    parser.add_argument(
-        "--gating_weight", type=float, default=1.0, help="Gating weight decay for soft threshold."
-    )
+    parser.add_argument("--gating_weight", type=float, default=1.0, help="Gating weight decay for soft threshold.")
     args = parser.parse_args()
 
     # Read in data

@@ -10,14 +10,16 @@ import time
 import os
 from scipy.ndimage import median_filter
 import nibabel as nib
+import copy
+from pathlib import Path
 
 
 def imoco(
-    ksp,
-    coord,
-    dcf,
+    ksp_in,
+    coord_in,
+    dcf_in,
     mrimg,
-    diagnosticsPath,
+    diagnostics_base_path,
     res_scale=1.0,
     lambda_tv=0.05,
     inner_iter=15,
@@ -34,21 +36,35 @@ def imoco(
     else:
         logging.info("Using CPU...")
 
-    logging.info("Kspace Shape: {}...".format(ksp.shape))
-    logging.info("trajectory Shape: {}...".format(coord.shape))
-    logging.info("DCF Shape: {}....".format(dcf.shape))
+    # Copy input data
+    ksp = copy.deepcopy(ksp_in)
+    coord = copy.deepcopy(coord_in)
+    dcf = copy.deepcopy(dcf_in)
 
-    nf_arr = np.sqrt(np.sum(coord[0, 0, :, :] ** 2, axis=1))
+    # As lists, list has len of n_bins
+    # (n_bins, n_coils, n_projections, n_readouts)
+    logging.info("Kspace Shape: {}...".format(ksp[0].shape))
+    # (n_bins, n_projections, n_readouts, n_dim)
+    logging.info("trajectory Shape: {}...".format(coord[0].shape))
+    # (n_bins, n_projections, n_readouts)
+    logging.info("DCF Shape: {}....".format(dcf[0].shape))
+
+    nf_arr = np.sqrt(np.sum(coord[0][0, :, :] ** 2, axis=1))
     nReadouts = np.sum(nf_arr < np.max(nf_arr) * res_scale)
     del nf_arr
 
-    coord = coord[..., :nReadouts, :]
-    ksp = ksp[..., :nReadouts]
-    dcf = dcf[..., :nReadouts]
+    ksp = [bin_data[..., :nReadouts] for bin_data in ksp]
+    coord = [bin_data[:, :nReadouts, :] for bin_data in coord]
+    dcf = [bin_data[..., :nReadouts] for bin_data in dcf]
 
-    logging.info("Image Shape Estimate: {}".format(sp.estimate_shape(coord)))
-    # nPhases, nEcalib, nCoils, nSpokes, nReadouts, _ = data.shape
-    nPhases, nCoils, nSpokes, nReadouts = ksp.shape
+    logging.info("Image Shape Estimate: {}".format(sp.estimate_shape(coord[0])))
+    nPhases = len(ksp)
+    nCoils, nSpokes, nReadouts = ksp[0].shape
+
+    # Make a dedicated diagnostics directory
+    diagnostics_dir = "{}/diagnostics/".format(Path(diagnostics_base_path))
+    # print(diagnostics_dir)
+    Path(diagnostics_dir).mkdir(parents=True, exist_ok=True)
 
     # calibration
     logging.info("Running calibration...")
@@ -69,46 +85,7 @@ def imoco(
         mps = np.ones_like(mps)
     tshape = mps.shape[1:]
     S = sp.linop.Multiply(tshape, mps)
-
-    # registration
-    # print("Registration...")
-    # # Options
-    # # Compute Device: -1=CPU or 0=GPU
-    # # Demons Force Variation - "passive" , "active", "inverseConsistent" https://arxiv.org/pdf/0909.0928.pdf
-    # variant = "active"
-    # diffeomorphic = False
-    # compositionType = "A"
-    # nLevels = 3
-    # cThresh = 1e-6
-    # max_iter = 4000
-    # alpha = 2.0
-
-    # # Gaussian Smoothing Sigmas.
-    # diffusionSigmas = 2.0
-    # fluidSigmas = 2.0
-
-    # M_fields = []
-    # iM_fields = []
-    # for ii in range(nPhases):
-    #     W, invW = Demons(
-    #         mrimg[nRef],
-    #         mrimg[ii],
-    #         nLevels=nLevels,
-    #         diffusionSigmas=diffusionSigmas,
-    #         fluidSigmas=fluidSigmas,
-    #         max_iter=max_iter,
-    #         alpha=alpha,
-    #         cThresh=cThresh,
-    #         variant=variant,
-    #         diffeomorphic=diffeomorphic,
-    #         compositionType=compositionType,
-    #         device=device,
-    #     ).run()
-    #     M_fields.append(W)
-    #     iM_fields.append(invW)
-    # M_fields = np.asarray(M_fields)
-    # iM_fields = np.asarray(iM_fields)
-    # registration
+    del mps
 
     logging.info("Registration...")
     M_fields = []
@@ -117,17 +94,15 @@ def imoco(
         pbar = trange(nPhases, leave=True)
         for ii in pbar:
             pbar.set_description("Registering Frame # {}...".format(ii))
-            M_field, iM_field = reg.ANTsReg(
-                median_filter(np.abs(mrimg[nRef]), 3), median_filter(np.abs(mrimg[ii]), 3)
-            )
+            M_field, iM_field = reg.ANTsReg(median_filter(np.abs(mrimg[nRef]), 3), median_filter(np.abs(mrimg[ii]), 3))
             M_fields.append(M_field)
             iM_fields.append(iM_field)
         M_fields = np.asarray(M_fields)
         iM_fields = np.asarray(iM_fields)
-        # np.save(diagnosticsPath + "/M_mr.npy", M_fields)
-        # np.save(diagnosticsPath + "/iM_mr.npy", iM_fields)
-        # M_fields = np.load(diagnosticsPath + "/M_mr.npy")
-        # iM_fields = np.load(diagnosticsPath + "/iM_mr.npy")
+        # np.save(diagnostics_dir + "/M_mr.npy", M_fields)
+        # np.save(diagnostics_dir + "/iM_mr.npy", iM_fields)
+        # M_fields = np.load(diagnostics_dir + "/M_mr.npy")
+        # iM_fields = np.load(diagnostics_dir + "/iM_mr.npy")
 
         iM_fields = [iM_fields[i] for i in range(iM_fields.shape[0])]
         M_fields = [M_fields[i] for i in range(M_fields.shape[0])]
@@ -139,37 +114,38 @@ def imoco(
 
         logging.info("Saving Motion Fields as nii...")
         tmp = np.asarray(M_fields)
-        print(tmp.shape)
+        # print(tmp.shape)
         tmp = np.moveaxis(tmp, 0, -1)
         tmp = np.transpose(tmp, (2, 1, 0, 3, 4))
         tmp = np.flip(tmp, (0, 1, 2))
         tmp = nib.Nifti1Image(tmp, np.eye(4))
-        nib.save(tmp, diagnosticsPath + "/M_mr.nii.gz")
+        nib.save(tmp, diagnostics_dir + "/M_mr.nii.gz")
 
         tmp = np.asarray(iM_fields)
-        print(tmp.shape)
+        # print(tmp.shape)
         tmp = np.moveaxis(tmp, 0, -1)
         tmp = np.transpose(tmp, (2, 1, 0, 3, 4))
         tmp = np.flip(tmp, (0, 1, 2))
         tmp = nib.Nifti1Image(tmp, np.eye(4))
-        nib.save(tmp, diagnosticsPath + "/iM_mr.nii.gz")
+        nib.save(tmp, diagnostics_dir + "/iM_mr.nii.gz")
         del tmp
     else:
         logging.info("Reading Motion Fields from disk...")
-        M_fields = nib.load(diagnosticsPath + "/M_mr.nii.gz").get_fdata()
+        M_fields = nib.load(diagnostics_dir + "/M_mr.nii.gz").get_fdata()
         M_fields = np.flip(M_fields, (0, 1, 2))
         M_fields = np.transpose(M_fields, (2, 1, 0, 3, 4))
+        M_fields = np.moveaxis(M_fields, -1, 0)
 
-        iM_fields = nib.load(diagnosticsPath + "/iM_mr.nii.gz").get_fdata()
+        iM_fields = nib.load(diagnostics_dir + "/iM_mr.nii.gz").get_fdata()
         iM_fields = np.flip(iM_fields, (0, 1, 2))
         iM_fields = np.transpose(iM_fields, (2, 1, 0, 3, 4))
-
+        iM_fields = np.moveaxis(iM_fields, -1, 0)
     # Recon
     logging.info("Prep...")
     Ms = []
     M0s = []
-    for i in range(nPhases):
-        M = reg.interp_op(tshape, M_fields[i])
+    for p in range(nPhases):
+        M = reg.interp_op(tshape, M_fields[p])
         M0 = reg.interp_op(tshape, np.zeros(tshape + (3,)))
         M = DLD(M, device=sp.Device(device))
         M0 = DLD(M0, device=sp.Device(device))
@@ -179,86 +155,120 @@ def imoco(
     M0s = Diags(M0s, oshape=(nPhases,) + tshape, ishape=(nPhases,) + tshape)
 
     PFTSMs = []
-    Is = []
-    for i in range(nPhases):
-        Is.append(sp.linop.Identity(tshape))
-        FTs = NFTs((nCoils,) + tshape, coord[i], device=sp.Device(device))
-        M = reg.interp_op(tshape, iM_fields[i])
+    # Is = []
+    # FTs = []
+    # Ms = []
+    # Ws = []
+    for p in range(nPhases):
+        # Is.append(sp.linop.Identity(tshape))
+        FT = NFTs((nCoils,) + tshape, coord[p], device=sp.Device(device))
+        M = reg.interp_op(tshape, iM_fields[p])
         M = DLD(M, device=sp.Device(device))
         W = sp.linop.Multiply(
             (
                 nCoils,
-                nSpokes,
+                dcf[p].shape[0],
                 nReadouts,
             ),
-            dcf[i],
+            dcf[p],
         )
-        FTSM = W * FTs * S * M
+        FTSM = W * FT * S * M
         PFTSMs.append(FTSM)
-    PFTSMs = (
-        Diags(
-            PFTSMs,
-            oshape=(
-                nPhases,
-                nCoils,
-                nSpokes,
-                nReadouts,
-            ),
-            ishape=(nPhases,) + tshape,
-        )
-        * Vstacks(Is, ishape=tshape, oshape=(nPhases,) + tshape)
-    )
+        # FTs.append(FT)
+        # Ms.append(M)
+        # Ws.append(W)
+    # PFTSMs = (
+    #     Diags(
+    #         PFTSMs,
+    #         oshape=(
+    #             nPhases,
+    #             nCoils,
+    #             nSpokes,
+    #             nReadouts,
+    #         ),
+    #         ishape=(nPhases,) + tshape,
+    #     )
+    #     * Vstacks(Is, ishape=tshape, oshape=(nPhases,) + tshape)
+    # )
 
-    # precondition
-    logging.info("Preconditioner calculation...")
-    tmp = PFTSMs.H * PFTSMs * np.complex64(np.ones(tshape))
-    L = np.mean(np.abs(tmp))
+    logging.info("Computing Preconditioner...")
+    timeI = time.time()
+    L = 0
+    for p in range(nPhases):
+        L += PFTSMs[p].H * PFTSMs[p] * np.complex64(np.ones(tshape))
+    L = np.sum(np.abs(L))
+    # L += np.sum(
+    #     np.abs(Ws[p].H * FTs[p].H * S.H * Ms[p].H * Ws[p] * FTs[p] * S * Ms[p] * np.complex64(np.ones(tshape)))
+    # )
+    # L = np.mean(np.abs(L))
+    L = L / (np.prod(tshape) * nPhases)
+    # logging.info("Preconditioner calculation...")
+    # tmp = PFTSMs.H * PFTSMs * np.complex64(np.ones(tshape))
+    # L = np.mean(np.abs(tmp))
     logging.info("Preconditioner Value: {}".format(L))
 
-    dcf = dcf[:, xp.newaxis, ...]
-    ksp = ksp * dcf
-    TV = sp.linop.FiniteDifference(PFTSMs.ishape, axes=(0, 1, 2))
+    # Apply density compensation
+    for p in range(nPhases):
+        for c in range(nCoils):
+            ksp[p][c] = ksp[p][c] * dcf[p]
+
+    # dcf = dcf[:, xp.newaxis, ...]
+    # ksp = ksp * dcf
+    # TV = sp.linop.FiniteDifference(PFTSMs[0].ishape, axes=(0, 1, 2))
+    TV = sp.linop.FiniteDifference(tshape, axes=(0, 1, 2))
+
+    # TV = sp.linop.FiniteDifference(PFTSMs.ishape, axes=(0, 1, 2))
     # ####### debug
     # print("TV dim:{}".format(TV.oshape))
     # proxg = sp.prox.UnitaryTransform(sp.prox.L1Reg(TV.oshape, lambda_tv), TV)
 
     # ADMM
     logging.info("Running iMoCo Recon...")
-    alpha = np.max(np.abs(PFTSMs.H * ksp))
+    # Compute alpha
+    alpha = 0
+    for p in range(nPhases):
+        alpha += PFTSMs[p].H * ksp[p]
+    alpha = np.max(np.abs(alpha))
+    # alpha = max(tmp, np.max(np.abs(PFTSMs[p].H * ksp[p])))
+    # alpha = np.max(np.abs(PFTSMs.H * ksp))
     # debug
-    logging.debug("alpha:{}".format(alpha))
+    logging.info("alpha:{}".format(alpha))
     sigma = 0.4
     tau = 0.4
-    X = np.zeros(tshape, dtype=np.complex64)
-    p = np.zeros_like(ksp)
-    X0 = np.zeros_like(X)
+    img = np.zeros(tshape, dtype=np.complex64)
+    Y = [np.zeros_like(k) for k in ksp]
+    img_0 = np.zeros_like(img)
     q = np.zeros((3,) + tshape, dtype=np.complex64)
     pbarOuter = trange(outer_iter, leave=True)
-    lossVal = []
+    cost_loss = []
     for ii in pbarOuter:
         timeI = time.time()
         pbarOuter.set_description("iMoco Outer Iter {}".format(ii))
-        p = (p + sigma * (PFTSMs * X - ksp)) / (1 + sigma)
-        q = q + sigma * TV * X
+        accum = 0
+        for p in range(nPhases):
+            Y[p] = (Y[p] + sigma * (PFTSMs[p] * img - ksp[p])) / (1 + sigma)
+            accum += PFTSMs[p].H * Y[p]
+            timeF = time.time()
+        # Prox?
+        q = q + sigma * TV * img
         q = q / (np.maximum(np.abs(q), alpha) / alpha)
-        X = X - tau * (1 / L * PFTSMs.H * p + lambda_tv * TV.H * q)
-        timeF = time.time()
-        pbarOuter.set_postfix(loss=np.linalg.norm(X - X0) / np.linalg.norm(X), time=timeF - timeI)
-        lossVal.append(np.linalg.norm(X - X0) / np.linalg.norm(X))
-        X0 = X
-    X = np.transpose(X, (2, 1, 0))
-    X = np.flip(X, (0, 1, 2))
-    lossVal = np.array(lossVal)
-    np.save(
+        img = img - tau * (1 / L * accum + lambda_tv * TV.H * q)
+        pbarOuter.set_postfix(loss=np.linalg.norm(img - img_0) / np.linalg.norm(img), time=timeF - timeI)
+        cost_loss.append(np.linalg.norm(img - img_0) / np.linalg.norm(img))
+        img_0 = img.copy()
+    img = np.transpose(img, (2, 1, 0))
+    img = np.flip(img, (0, 1, 2))
+    cost_loss = np.array(cost_loss)
+    np.savetxt(
         os.path.join(
-            diagnosticsPath,
-            "loss_frm" + str(nRef) + "_lambda" + str(lambda_tv) + "_res" + str(res_scale),
+            diagnostics_dir,
+            "imoco_loss_refFrame" + str(nRef) + "_lambda" + str(lambda_tv) + "_res" + str(res_scale) + ".txt",
         ),
-        lossVal,
+        cost_loss,
     )
     timeFinish = time.time()
     logging.info("iMoco Recon Finished in: {} min...".format((timeFinish - timeStart) / 60))
-    return X
+    return img
 
 
 if __name__ == "__main__":
