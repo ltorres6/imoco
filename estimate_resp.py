@@ -22,7 +22,7 @@ def estimate_resp(dc, tr, n=9999, fl=0.1, fh=1.5, fw=0.01, usePhase=False):
     Returns:
         array: respiratory signal of length num_tr.
     """
-    if usePhase is True:
+    if usePhase:
         dc = np.unwrap(np.angle(dc))
     else:
         dc = np.abs(dc)

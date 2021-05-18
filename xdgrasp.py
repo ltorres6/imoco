@@ -3,7 +3,7 @@ import sigpy as sp
 import numpy as np
 import sigpy.mri as mr
 from imoco_e import cfl, ext
-from imoco_e.linop_e import NFTs, Diags
+from imoco_e.linop_e import NFTs
 from tqdm import trange
 import time
 import logging
@@ -34,7 +34,6 @@ def xdgrasp(
 ):
     timeStart = time.time()
     sp.Device(device).use()
-    xp = sp.Device(device).xp
     if device >= 0:
         logging.info("Using GPU...")
     else:
@@ -71,7 +70,7 @@ def xdgrasp(
     Path(diagnostics_dir).mkdir(parents=True, exist_ok=True)
 
     # calibration
-    logging.info("Running calibration...")
+    logging.info("Running Jsense calibration...")
     # Map for each Motion Phase?
     mps = mr.app.JsenseRecon(
         ksp[0],
@@ -83,6 +82,7 @@ def xdgrasp(
         device=device,
         max_iter=10,
         max_inner_iter=10,
+        show_pbar=False,
     ).run()
     mps = sp.to_device(mps)
     if nCoils <= 1:
@@ -94,7 +94,7 @@ def xdgrasp(
     logging.info("Image Shape: {}....".format(tshape))
     logging.info("Computing Linops...")
     PFTSs = []
-    for ii in trange(nPhases, desc="Motion Phases"):
+    for ii in range(nPhases):
         FTs = NFTs((nCoils,) + tshape, coord[ii], device=sp.Device(device))
         W = sp.linop.Multiply(
             (
@@ -143,11 +143,11 @@ def xdgrasp(
     tau = 0.4
     sigma = 0.4
     logging.info("Running XD-Grasp")
-    pbarOuter = trange(outer_iter, leave=True)
+    pbarOuter = trange(outer_iter, leave=True, ncols=80)
     cost_loss = []
     for ii in pbarOuter:
         timeI = time.time()
-        pbarOuter.set_description("XD-Grasp Outer Iter {}".format(ii))
+        pbarOuter.set_description(f"XD-Grasp Iter {ii}")
         # Save a slice for diagnostics
         if save_iter_slice:
             save_slice(img[0], diagnostics_dir)
@@ -169,7 +169,7 @@ def xdgrasp(
         ),
         cost_loss,
     )
-    logging.info("XDGrasp Recon Finished in: {} min...".format((timeFinish - timeStart) / 60))
+    logging.info(f"XDGrasp Recon Finished in: {(timeFinish - timeStart) / 60} min...")
     return sp.to_device(img)
 
 

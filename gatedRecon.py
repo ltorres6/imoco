@@ -13,7 +13,7 @@ import copy
 def gatingWeights(resp, gating_type="hard", percentile=25, decay=1, flip=False):
     # Should add a detrend option with running mean...
     sigma = 1.4628 * np.median(np.abs(resp - np.median(resp)))
-    resp = (resp - np.median(resp)) / sigma
+    resp = -1 * (resp - np.median(resp)) / sigma
     thresh = np.percentile(resp, percentile)
     if flip:
         resp *= -1
@@ -83,14 +83,14 @@ def gatedRecon(
         raise ValueError("Unknown Gating Type.")
 
     # Reconstruction
-    pbarOuter = trange(nCoils, leave=True)
+    pbarOuter = trange(nCoils, leave=True, ncols=80)
     coord = sp.to_device(coord, device)
     ksp = ksp * (dcf ** 2)
     with sp.Device(device):
         img = 0
         for c in pbarOuter:
             timeI = time.time()
-            pbarOuter.set_description("Reconstructing Coil # {}".format(c))
+            pbarOuter.set_description(f"{gating_type}Recon - Coil: {c}")
             ksp_c = sp.to_device(ksp[c], device)
             img_c = sp.nufft_adjoint(ksp_c, coord, oshape=img_shape)
             img = img + sp.to_device(xp.abs(img_c ** 2), -1)

@@ -3,7 +3,7 @@ import sigpy as sp
 import sigpy.mri as mr
 import numpy as np
 from imoco_e import cfl, reg
-from imoco_e.linop_e import NFTs, Diags, DLD, Vstacks
+from imoco_e.linop_e import NFTs, Diags, DLD
 from tqdm import trange
 import logging
 import time
@@ -12,6 +12,14 @@ from scipy.ndimage import median_filter
 import nibabel as nib
 import copy
 from pathlib import Path
+
+
+def save_slice(img, save_dir):
+    img_save = np.squeeze(np.abs(sp.to_device(img[:, img.shape[1] // 2, :])))
+    imgShapeString = "_".join(map(str, img_save.shape[::-1])) + "Shape.dat"
+    with open(save_dir + "iter_slices" + imgShapeString, "ab") as f:
+        f.write(img_save.tobytes())
+    del img_save
 
 
 def imoco(
@@ -30,11 +38,11 @@ def imoco(
 ):
     timeStart = time.time()
     sp.Device(device).use()
-    xp = sp.Device(device).xp
     if device >= 0:
         logging.info("Using GPU...")
     else:
         logging.info("Using CPU...")
+    save_iter_slice = True
 
     # Copy input data
     ksp = copy.deepcopy(ksp_in)
@@ -79,6 +87,7 @@ def imoco(
         device=device,
         max_iter=10,
         max_inner_iter=10,
+        show_pbar=False,
     ).run()
     mps = sp.to_device(mps)
     if nCoils <= 1:
@@ -90,10 +99,10 @@ def imoco(
     logging.info("Registration...")
     M_fields = []
     iM_fields = []
-    if reg_flag is 1:
-        pbar = trange(nPhases, leave=True)
+    if reg_flag == 1:
+        pbar = trange(nPhases, leave=True, ncols=80)
         for ii in pbar:
-            pbar.set_description("Registering Frame # {}...".format(ii))
+            pbar.set_description(f"Registering Frame: {ii}...")
             M_field, iM_field = reg.ANTsReg(median_filter(np.abs(mrimg[nRef]), 3), median_filter(np.abs(mrimg[ii]), 3))
             M_fields.append(M_field)
             iM_fields.append(iM_field)
@@ -239,11 +248,14 @@ def imoco(
     Y = [np.zeros_like(k) for k in ksp]
     img_0 = np.zeros_like(img)
     q = np.zeros((3,) + tshape, dtype=np.complex64)
-    pbarOuter = trange(outer_iter, leave=True)
+    pbarOuter = trange(outer_iter, leave=True, ncols=80)
     cost_loss = []
     for ii in pbarOuter:
         timeI = time.time()
-        pbarOuter.set_description("iMoco Outer Iter {}".format(ii))
+        pbarOuter.set_description(f"iMoco Iter: {ii}")
+        # Save a slice for diagnostics
+        if save_iter_slice:
+            save_slice(img, diagnostics_dir)
         accum = 0
         for p in range(nPhases):
             Y[p] = (Y[p] + sigma * (PFTSMs[p] * img - ksp[p])) / (1 + sigma)

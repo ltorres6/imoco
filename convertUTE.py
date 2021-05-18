@@ -47,8 +47,7 @@ def convertUTE(h5_file, nCoilsPCA=8, dsfSpokes=1.0):
 
             # k = hf["Kdata"][f"KData_E0_C{c}"]
             ksp.append(
-                hf["Kdata"][f"KData_E0_C{c}"]["real"][0][order]
-                + 1j * hf["Kdata"][f"KData_E0_C{c}"]["imag"][0][order]
+                hf["Kdata"][f"KData_E0_C{c}"]["real"][0][order] + 1j * hf["Kdata"][f"KData_E0_C{c}"]["imag"][0][order]
             )
         logging.info(f"Stacking as np array...")
         ksp = np.stack(ksp, axis=0)
@@ -64,9 +63,7 @@ def convertUTE(h5_file, nCoilsPCA=8, dsfSpokes=1.0):
                 ksp /= np.abs(ksp).max()
         else:
             try:
-                logging.info(
-                    "Too many channels for whitening. Compressing to {} channels.".format(nCoilsPCA)
-                )
+                logging.info("Too many channels for whitening. Compressing to {} channels.".format(nCoilsPCA))
                 ksp = pcaCoilCompression(kdata=ksp, axis=0, target_channels=nCoilsPCA)
                 noise = hf["Kdata"]["Noise"]["real"] + 1j * hf["Kdata"]["Noise"]["imag"]
                 noise = pcaCoilCompression(kdata=noise, axis=0, target_channels=nCoilsPCA)
@@ -85,31 +82,35 @@ def convertUTE(h5_file, nCoilsPCA=8, dsfSpokes=1.0):
     dcf = dcf[:nSpokes, :]
     logging.info(f"Total Number of Spokes: {totalSpokes}, Requested Number of Spokes: {nSpokes}")
 
-    return ksp, coord, dcf, resp/resp.max()
+    # Get TR
+    d_time = time[order]
+    tr = d_time[1] - d_time[0]
+    return ksp, coord, dcf, resp / resp.max(), tr
 
 
 if __name__ == "__main__":
 
-    parser = argparse.ArgumentParser(
-        description="Converts UWUTE h5 files to npy arrays in natural time ordering."
-    )
+    parser = argparse.ArgumentParser(description="Converts UWUTE h5 files to npy arrays in natural time ordering.")
     parser.add_argument("h5_file", type=str)
     parser.add_argument("ksp_file", type=str)
     parser.add_argument("coord_file", type=str)
     parser.add_argument("dcf_file", type=str)
     parser.add_argument("resp_file", type=str)
+    parser.add_argument("tr_file", type=str)
     parser.add_argument("--dsfSpokes", type=float, default=1.0)
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO)
 
-    ksp, coord, dcf, resp = convertUTE(args.h5_file, args.dsfSpokes)
+    ksp, coord, dcf, resp, tr = convertUTE(args.h5_file, args.dsfSpokes)
     logging.info("Saving data.")
     if os.path.isfile(args.ksp_file):
         os.remove(args.ksp_file)
         os.remove(args.coord_file)
         os.remove(args.dcf_file)
         os.remove(args.resp_file)
+        os.remove(args.tr_file)
     np.save(args.ksp_file, ksp)
     np.save(args.coord_file, coord)
     np.save(args.dcf_file, dcf)
     np.save(args.resp_file, resp)
+    np.save(args.tr_file, tr)

@@ -5,6 +5,7 @@ import logging
 import pandas as pd
 import matplotlib.pyplot as plt
 import copy
+from load_external_binning import load_external_binning
 
 # import matplotlib.pyplot as plt
 
@@ -65,7 +66,18 @@ def clean_resp(resp, diagnostics_dir, N=2000):
     return np.array(resp[idx_keep]), idx_keep
 
 
-def bin_motion_states(ksp_in, coord_in, dcf_in, resp_in, n, diagnostics_dir, filter_bulk=False, filter_extremes=False):
+def bin_motion_states(
+    ksp_in,
+    coord_in,
+    dcf_in,
+    resp_in,
+    n,
+    diagnostics_dir,
+    filter_bulk=False,
+    filter_extremes=False,
+    external=False,
+    external_path=None,
+):
     """Bin kspace, coordinates, and dcf by respiratory motion.
 
     Args:
@@ -87,13 +99,13 @@ def bin_motion_states(ksp_in, coord_in, dcf_in, resp_in, n, diagnostics_dir, fil
     dcf = copy.deepcopy(dcf_in)
     resp = copy.deepcopy(resp_in)
 
-    if filter_bulk:
-        n_original = resp.size
-        resp, idx_keep = clean_resp(resp, diagnostics_dir)
-        ksp = ksp[:, idx_keep]
-        coord = coord[idx_keep]
-        dcf = dcf[idx_keep]
-        logging.info("Number of projections excluded: {}".format(n_original - resp.size))
+    # if filter_bulk:
+    #     n_original = resp.size
+    #     resp, idx_keep = clean_resp(resp, diagnostics_dir)
+    #     ksp = ksp[:, idx_keep]
+    #     coord = coord[idx_keep]
+    #     dcf = dcf[idx_keep]
+    #     logging.info("Number of projections excluded: {}".format(n_original - resp.size))
 
     # nSpokes = dcf.shape[0]
     # count = 0
@@ -111,39 +123,68 @@ def bin_motion_states(ksp_in, coord_in, dcf_in, resp_in, n, diagnostics_dir, fil
     # respOrder = np.argsort(resp)
     # plt.plot(resp[respOrder])
 
-    if filter_extremes:
-        margin = 1  # Remove 1% at both ends
-        bins = np.linspace(np.percentile(resp, margin), np.percentile(resp, 100 - margin), n + 1)
+    if external and external_path is not None:
+        bins = load_external_binning(external_path)
+        kspB = []
+        coordB = []
+        dcfB = []
+        for b in range(n):
+            idx = bins == b
+            kspB.append(ksp[:, idx])
+            coordB.append(coord[idx])
+            dcfB.append(dcf[idx])
+        # Plot binned waveform
+        # de_colores = plt.cm.get_cmap("tab20", n)
+        # plt.plot(resp, "k")
+        # for b in range(n):
+        #     idx = np.where(bins == b)
+        #     plt.plot(np.arange(resp.size), np.ones((resp.size,)) * resp[idx].min(), color=de_colores(b))
+        # plt.plot(np.arange(resp.size), np.ones((resp.size,)) * resp[idx].max(), color=de_colores(b + 1))
+        # plt.savefig(diagnostics_dir + "resp_binned.png")
+        # plt.close()
+        # for b in range(n):
+        #     idx = bins == b
+        #     resp_temp = resp
+        #     resp_temp[idx] = np.nan
+        #     plt.plot(resp_temp, color=de_colores(b))
+        # plt.savefig(diagnostics_dir + "resp_binned2.png")
+        # plt.close()
+        return kspB, coordB, dcfB
+
     else:
-        bins = np.linspace(resp.min(), resp.max(), n + 1)
+        if filter_extremes:
+            margin = 1  # Remove 1% at both ends
+            bins = np.linspace(np.percentile(resp, margin), np.percentile(resp, 100 - margin), n + 1)
+        else:
+            bins = np.linspace(resp.min(), resp.max(), n + 1)
 
-    kspB = []
-    coordB = []
-    dcfB = []
-    for b in range(n):
-        idx = (resp >= bins[b]) & (resp < bins[b + 1])
-        # print(idx)
-        # idx = respOrder[b * nSpokesB : (b + 1) * nSpokesB]
-        kspB.append(ksp[:, idx])
-        coordB.append(coord[idx])
-        dcfB.append(dcf[idx])
-        # print(ksp[:, idx].shape)
-        # plt.plot(idx, resp[idx])
-    # plt.show()
-    # kspB = np.stack(kspB)
-    # coordB = np.stack(coordB)
-    # dcfB = np.stack(dcfB)
+        kspB = []
+        coordB = []
+        dcfB = []
+        for b in range(n):
+            idx = (resp >= bins[b]) & (resp < bins[b + 1])
+            # print(idx)
+            # idx = respOrder[b * nSpokesB : (b + 1) * nSpokesB]
+            kspB.append(ksp[:, idx])
+            coordB.append(coord[idx])
+            dcfB.append(dcf[idx])
+            # print(ksp[:, idx].shape)
+            # plt.plot(idx, resp[idx])
+        # plt.show()
+        # kspB = np.stack(kspB)
+        # coordB = np.stack(coordB)
+        # dcfB = np.stack(dcfB)
 
-    # Plot binned waveform
-    de_colores = plt.cm.get_cmap("tab20", n)
-    plt.plot(resp, "k")
-    for b in range(n):
-        # idx = respOrder[b * nSpokesB : (b + 1) * nSpokesB]
-        plt.plot(np.arange(resp.size), np.ones((resp.size,)) * bins[b], color=de_colores(b))
-    plt.plot(np.arange(resp.size), np.ones((resp.size,)) * bins[b + 1], color=de_colores(b + 1))
-    plt.savefig(diagnostics_dir + "resp_binned.png")
-    plt.close()
-    return kspB, coordB, dcfB
+        # Plot binned waveform
+        de_colores = plt.cm.get_cmap("tab20", n)
+        plt.plot(resp, "k")
+        for b in range(n):
+            # idx = respOrder[b * nSpokesB : (b + 1) * nSpokesB]
+            plt.plot(np.arange(resp.size), np.ones((resp.size,)) * bins[b], color=de_colores(b))
+        plt.plot(np.arange(resp.size), np.ones((resp.size,)) * bins[b + 1], color=de_colores(b + 1))
+        plt.savefig(diagnostics_dir + "resp_binned.png")
+        plt.close()
+        return kspB, coordB, dcfB
 
 
 if __name__ == "__main__":
