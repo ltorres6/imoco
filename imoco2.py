@@ -13,8 +13,11 @@ import nibabel as nib
 import copy
 from pathlib import Path
 from normalize import normalize
+import sys
 import sigpy.plot as plt
 import torch as th
+
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import airlab as al
 
@@ -103,7 +106,7 @@ def imoco(
     del mps
 
     logging.info("Registration...")
-    vox_res = [n * mr_scale for n in [1, 1, 1]]
+    vox_res = [n * mr_scale * 0.75 for n in [1, 1, 1]]
     M_fields = []
     iM_fields = []
     # reg_flag = 0
@@ -173,9 +176,26 @@ def imoco(
 
     # Recon
     logging.info("Prep...")
-
+    # Ms = []
+    # M0s = []
+    # for p in range(nPhases):
+    #     M = reg.interp_op(tshape, M_fields[p])
+    #     M0 = reg.interp_op(tshape, np.zeros(tshape + (3,)))
+    #     M = DLD(M, device=sp.Device(device))
+    #     M0 = DLD(M0, device=sp.Device(device))
+    #     Ms.append(M)
+    #     M0s.append(M0)
+    # Ms = Diags(Ms, oshape=(nPhases,) + tshape, ishape=(nPhases,) + tshape)
+    # M0s = Diags(M0s, oshape=(nPhases,) + tshape, ishape=(nPhases,) + tshape)
+    # plt.ImagePlot(np.asarray(M_fields))
+    # plt.ImagePlot(-np.asarray(M_fields))
+    # plt.ImagePlot(np.asarray(iM_fields))
+    # plt.ImagePlot(-np.asarray(iM_fields))
     PFTSMs = []
-
+    # Is = []
+    # FTs = []
+    # Ms = []
+    # Ws = []
     for p in range(nPhases):
         # Is.append(sp.linop.Identity(tshape))
         FT = NFTs((nCoils,) + tshape, coord[p], device=sp.Device(device))
@@ -185,6 +205,22 @@ def imoco(
         W = sp.linop.Multiply((nCoils, dcf[p].shape[0], nReadouts,), dcf[p],)
         FTSM = W * FT * S * M
         PFTSMs.append(FTSM)
+        # FTs.append(FT)
+        # Ms.append(M)
+        # Ws.append(W)
+    # PFTSMs = (
+    #     Diags(
+    #         PFTSMs,
+    #         oshape=(
+    #             nPhases,
+    #             nCoils,
+    #             nSpokes,
+    #             nReadouts,
+    #         ),
+    #         ishape=(nPhases,) + tshape,
+    #     )
+    #     * Vstacks(Is, ishape=tshape, oshape=(nPhases,) + tshape)
+    # )
 
     logging.info("Computing Preconditioner...")
     timeI = time.time()
@@ -192,8 +228,14 @@ def imoco(
     for p in range(nPhases):
         L += PFTSMs[p].H * PFTSMs[p] * np.complex64(np.ones(tshape))
     L = np.sum(np.abs(L))
-
+    # L += np.sum(
+    #     np.abs(Ws[p].H * FTs[p].H * S.H * Ms[p].H * Ws[p] * FTs[p] * S * Ms[p] * np.complex64(np.ones(tshape)))
+    # )
+    # L = np.mean(np.abs(L))
     L = L / (np.prod(tshape) * nPhases)
+    # logging.info("Preconditioner calculation...")
+    # tmp = PFTSMs.H * PFTSMs * np.complex64(np.ones(tshape))
+    # L = np.mean(np.abs(tmp))
     logging.info("Preconditioner Value: {}".format(L))
 
     # Apply density compensation

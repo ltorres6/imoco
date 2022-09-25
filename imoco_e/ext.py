@@ -39,37 +39,20 @@ def FD(ishape, axes=None):
     return G
 
 
-def TVt_prox(X, lamda, iter_max=10):
-    scale = np.max(np.abs(X))
+def TVt_prox(X, lamda, iter_max=10, tv_device=sp.Device(-1)):
+    xp = sp.Device(tv_device).xp
+    X = sp.to_device(X, tv_device)
+    scale = xp.max(xp.abs(X))
     X = X / scale
     TVt = FD(X.shape, axes=(0,))
     # TVt = sp.linop.FiniteDifferences2(X.shape, axes=(0,), shift=(1,))
     X_b = X
     Y = TVt * X
-    Y = Y / (np.abs(Y) + 1e-9) * np.minimum(np.abs(Y) + 1e-9, 1)
+    Y = Y / (xp.abs(Y) + 1e-9) * xp.minimum(xp.abs(Y) + 1e-9, 1)
     for _ in range(iter_max):
         X_b = X_b - ((X_b - X) + lamda * TVt.H * Y)
         Y = Y + lamda * TVt * X_b
-        Y = Y / (np.abs(Y) + 1e-9) * np.minimum(np.abs(Y) + 1e-9, 1)
+        Y = Y / (xp.abs(Y) + 1e-9) * xp.minimum(xp.abs(Y) + 1e-9, 1)
 
     X_b = X_b * scale
-    return X_b
-
-
-def TV(ishape, axes=None):
-    """Linear operator that computes Total Variation across motion states.
-    Args:
-       ishape (tuple of ints): Input shape.
-    """
-    I = sp.linop.Identity(ishape)
-    axes = sp.util._normalize_axes(axes, len(ishape))
-    ndim = len(ishape)
-    linops = []
-    for i in axes:
-        D = I - sp.linop.Circshift(ishape, [0] * i + [1] + [0] * (ndim - i - 1))
-        R = sp.linop.Reshape([1] + list(ishape), ishape)
-        linops.append(R * D)
-
-    G = sp.linop.Vstack(linops, axis=0)
-
-    return G
+    return sp.to_device(X_b)

@@ -78,24 +78,24 @@ def convert_ute(h5_file, max_coils=8, dsfSpokes=1.0, compress_coils=False):
                 np.squeeze(hf["Kdata"].attrs["dft_neededZ"]),
             ]
 
-            logging.debug(f"Frames {num_frames}")
-            logging.debug(f"Coils {num_coils}")
-            logging.debug(f"Encodings {num_encodes}")
-            logging.debug(f"Trajectory Type {trajectory_type}")
-            logging.debug(f"DFT Needed {dft_needed}")
+            logging.info(f"Frames {num_frames}")
+            logging.info(f"Coils {num_coils}")
+            logging.info(f"Encodings {num_encodes}")
+            logging.info(f"Trajectory Type {trajectory_type}")
+            logging.info(f"DFT Needed {dft_needed}")
 
         except Exception:
-            logging.warning("Missing H5 Attributes...")
+            logging.info("Missing H5 Attributes...")
 
             num_coils = 0
             while f"KData_E0_C{num_coils}" in hf["Kdata"]:
                 num_coils += 1
-            logging.debug(f"Number of coils: {num_coils}")
+            logging.info(f"Number of coils: {num_coils}")
 
             num_encodes = 0
             while f"KData_E{num_encodes}_C0" in hf["Kdata"]:
                 num_encodes += 1
-            logging.debug(f"Number of encodes: {num_encodes}")
+            logging.info(f"Number of encodes: {num_encodes}")
 
         # if max_coils is not None:
         #     num_coils = min(max_coils, num_coils)
@@ -108,7 +108,7 @@ def convert_ute(h5_file, max_coils=8, dsfSpokes=1.0, compress_coils=False):
 
         for encode in range(num_encodes):
 
-            logging.debug(f"Loading encode {encode}")
+            logging.info(f"Loading encode {encode}")
             # Load timing and resp waveform and sort
             logging.debug(f"Loading timings and resp signal")
             try:
@@ -128,7 +128,7 @@ def convert_ute(h5_file, max_coils=8, dsfSpokes=1.0, compress_coils=False):
             logging.debug("Loading Coordinates")
             coord = []
             for i in ["Z", "Y", "X"]:
-                # logging.debug(f"Loading {i} coords.")
+                # logging.info(f"Loading {i} coords.")
                 coord.append(hf["Kdata"][f"K{i}_E{encode}"][0][order])
             coord = np.stack(coord, axis=-1)
 
@@ -153,11 +153,11 @@ def convert_ute(h5_file, max_coils=8, dsfSpokes=1.0, compress_coils=False):
                 )
             logging.debug(f"Stacking as np array...")
             ksp = np.stack(ksp, axis=0)
-            logging.debug("num_coils {}".format(num_coils))
+            logging.info("num_coils {}".format(num_coils))
 
             try:
                 noise = hf["Kdata"]["Noise"]["real"] + 1j * hf["Kdata"]["Noise"]["imag"]
-                logging.debug("Whitening ksp.")
+                logging.info("Whitening ksp.")
                 cov = get_cov(noise)
                 ksp = whiten(ksp, cov)
             except (MemoryError, Exception) as err:
@@ -190,11 +190,11 @@ def convert_ute(h5_file, max_coils=8, dsfSpokes=1.0, compress_coils=False):
     resps = np.concatenate(resps, axis=0)
 
     # crop empty calibration region (1800 spokes for ipf)
-    # kdata = kdata[:, :-1800, :]
-    # coords = coords[:-1800, :, :]
-    # dcfs = dcfs[:-1800, :]
-    # resps = resps[:-1800]
-    # ecgs = ecgs[:-1800]
+    kdata = kdata[:, :-1800, :]
+    coords = coords[:-1800, :, :]
+    dcfs = dcfs[:-1800, :]
+    resps = resps[:-1800]
+    ecgs = ecgs[:-1800]
 
     # crop to desired number of spokes (all by default)
     totalSpokes = kdata.shape[1]
@@ -203,14 +203,14 @@ def convert_ute(h5_file, max_coils=8, dsfSpokes=1.0, compress_coils=False):
     coords = coords[:nSpokes, :, :]
     dcfs = dcfs[:nSpokes, :]
     resps = resps[:nSpokes]
-    logging.debug(f"Total Number of Spokes: {totalSpokes}, Requested Number of Spokes: {nSpokes}")
+    logging.info(f"Total Number of Spokes: {totalSpokes}, Requested Number of Spokes: {nSpokes}")
 
     # Log the data
-    logging.debug(f"MRI coords final shape: {coords.shape}")
-    logging.debug(f"MRI dcf final shape: {dcfs.shape}")
+    logging.info(f"MRI coords final shape: {coords.shape}")
+    logging.info(f"MRI dcf final shape: {dcfs.shape}")
     logging.info(f"MRI kdata final shape: {kdata.shape}")
-    logging.debug(f"MRI ecg final shape: {ecgs.shape}")
-    logging.debug(f"MRI resp final shape: {resps.shape}")
+    logging.info(f"MRI ecg final shape: {ecgs.shape}")
+    logging.info(f"MRI resp final shape: {resps.shape}")
 
     # Get TR
     d_time = time[order]
@@ -238,7 +238,7 @@ if __name__ == "__main__":
     ksp, coord, dcf, resp, tr = convert_ute(
         args.h5_file, max_coils=args.max_coils, dsfSpokes=args.dsf_spokes, compress_coils=args.compress_coils
     )
-    logging.debug("Saving data.")
+    logging.info("Saving data.")
     for filename in [args.ksp_file, args.coord_file, args.dcf_file, args.resp_file, args.tr_file]:
         try:
             os.remove(filename)

@@ -32,6 +32,7 @@ def writeSlices(series_tag_values, new_img, path, UID_base, i):
         "0020|0032", "\\".join(map(str, new_img.TransformIndexToPhysicalPoint((0, 0, i))))
     )  # Image Position (Patient)
     # image_slice.SetMetaData("0020|1041", str(i * 1.25))  # Slice Location
+
     image_slice.SetMetaData("0020|0013", str(i))  # Instance Number
     image_slice.SetMetaData("0008|0018", "1.2.3" + str(i))  # Media Storage SOP Instance UID
     image_slice.SetMetaData("0002|0003", "1.2.3" + str(i))  # Media Storage SOP Instance UID
@@ -54,24 +55,20 @@ def writeDicoms(imgPath, dicomDir, UID_base, subject_id, series_num):
     img = nib.load(imgPath).get_fdata()
     # Convert to uint16
     img = convert(img, 0, 65535, "uint16")
-    # Check if 3D or 4D
-    if img.ndim == 4:
-        # Orient Properly
-        img = np.flip(np.flip(np.transpose(img, [2, 1, 0, 3]), axis=1), axis=2)
-    else:
-        # Orient Properly
-        img = np.flip(np.flip(np.transpose(img, [2, 1, 0]), axis=1), axis=2)
+    # Orient Properly
+    img = np.flip(np.flip(np.transpose(img, [2, 1, 0]), axis=1), axis=2)
     # plt.ImagePlot(img)
 
     ishape = img.shape
     img = sitk.GetImageFromArray(img)
     origin = [-1 * (i // 2) for i in ishape]
-    img.SetSpacing([0.7, 0.7, 0.7])
+    img.SetSpacing([1.25, 1.25, 1.25])
     img.SetOrigin(origin)
-
+    # img = sitk.DICOMOrient(img, "RAS")
     modification_time = time.strftime("%H%M%S")
     modification_date = time.strftime("%Y%m%d")
     direction = img.GetDirection()
+    # print(direction)
     # UID_base = "1.2.840.0.1.3680043.2.1125." + modification_date + ".1" + modification_time
     # Study -> Series -> Imag
     series_tag_values = [
@@ -92,20 +89,20 @@ def writeDicoms(imgPath, dicomDir, UID_base, subject_id, series_num):
                         direction[3],
                         direction[6],  # Image Orientation (Patient)
                         direction[1],
-                        direction[4],
+                        -direction[4],
                         direction[7],
                     ),
                 )
             ),
         ),
-        ("0008|1030", "BPD"),  # Study Description
+        ("0008|1030", "IPF"),  # Study Description
         ("0008|103e", "3D UltraShort Echo Time"),  # Series Description
         ("0025|1007", str(ishape[-1])),  # Images in Series
         ("0010|0010", f"subject_{subject_id}"),  # Patient Name
         ("0010|0020", f"subject_{subject_id}"),  # Patient ID
-        ("0028|0030", "0.70\\0.70"),  # Pixel Spacing
-        ("0018|0088", "0.70"),  # Slice Spacing
-        ("0018,0050", "0.70"),  # Slice Thickness
+        ("0028|0030", "1.25\\1.25"),  # Pixel Spacing
+        ("0018|0088", "1.25"),  # Slice Spacing
+        ("0018,0050", "1.25"),  # Slice Thickness
         ("0020|0011", f"{series_num}"),  # Series Number
         ("0020|0012", "1"),  # Acquisition Number
         ("0018|0020", "GR"),  # Scan Sequence Type (Gradient Recalled)
@@ -126,8 +123,8 @@ def writeDicoms(imgPath, dicomDir, UID_base, subject_id, series_num):
         # ("0020,9221", "xx.yy.zz.1"),  # Volumetric Properties
         # ("0028|0008", "6"),  # Number of Frames
         # ("0028|0009", "[0020, 0012]"),  # Frame Pointer
-        ("0028|1050", "18000"),  # Window Center
-        ("0028|1051", "26000"),  # Window Width
+        ("0028|1050", "6000"),  # Window Center
+        ("0028|1051", "12000"),  # Window Width
     ]
 
     # Write slices to output directory

@@ -6,10 +6,17 @@ from sigpy.linop import Linop
 from sigpy import backend
 import scipy.ndimage as ndimage
 from scipy.io import loadmat
+import sys
 from skimage.exposure import match_histograms
 import torch as th
 from normalize import normalize
-import airlab as al
+from scipy.stats.mstats import winsorize
+import sigpy.plot as plt
+
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+# import airlab as al
+# import ants
 
 __all__ = ["interp_op", "interp", "ANTsReg", "regAirlab", "ANTsAff", "interp_affine_op"]
 
@@ -125,8 +132,9 @@ def ANTsReg(
     diffusion=2.0,
     diagnostics_dir=None,
 ):
-    os.environ["ITK_GLOBAL_DEFAULT_NUMBER_OF_THREADS"] = str(12)
-
+    cwd = os.getcwd()
+    os.chdir(diagnostics_dir)
+    os.environ["ITK_GLOBAL_DEFAULT_NUMBER_OF_THREADS"] = str(24)
     # transfer to nifti
     Ifnft = nibabel.Nifti1Image(If, affine=np.diag(vox_res + [1]))
     Imnft = nibabel.Nifti1Image(Im, affine=np.diag(vox_res + [1]))
@@ -141,14 +149,43 @@ def ANTsReg(
     reg_level_s = "x".join([str(t) for t in reg_level])
     gauss_filt_s = "x".join([str(t) for t in gauss_filt])
 
+    # # neighborhood cross correlatio
+    # ants_cmd = f"antsRegistration -d 3 -v 1 -m CC[ tmp_If.nii, tmp_Im.nii, 1, 4 ] -t BSplineSyN[ 0.15, 10, 0, 3 ] \
+    # -c [ 5000x500x250x150, 1e-6, 10 ] -s {gauss_filt_s}vox -f {reg_level_s} --winsorize-image-intensities [0.05,1.0]\
+    # -l 1 -u 1 -z 1 -x [tmp_If_mask.nii, tmp_Im_mask.nii] -o tmp_ --write-interval-volumes 5 "
+
+    # neighborhood cross correlation
+    # # Same as above but using Syn
+    # ants_cmd = f"antsRegistration -d 3 -v 1 -m CC[ tmp_If.nii, tmp_Im.nii, 1, 4 ] -t SyN[ 0.25, {fluid}, {diffusion} ] \
+    # -c [ 5000x500x250x150, 1e-6, 10 ] -s {gauss_filt_s}vox -f {reg_level_s} --winsorize-image-intensities [0.05,1.0]\
+    # -l 1 -u 1 -z 1 -x [tmp_If_mask.nii, tmp_Im_mask.nii] -o [ tmp_, warped_{frame}_{fluid}fluid_{diffusion}diffusion.nii.gz ] "
+
+    # mutual information
+    # Same as above but using Syn
+    # ants_cmd = f"antsRegistration -d 3 -v 1 -m MI[ tmp_If.nii, tmp_Im.nii, 1,  32 ] -t SyN[ 0.1, {fluid}, {diffusion} ] \
+    # -c [ 500x500x250x150, 1e-6, 10 ] -s {gauss_filt_s}vox -f {reg_level_s} --winsorize-image-intensities [0.05,1.0]\
+    # -l 1 -u 1 -z 1 -x [tmp_If_mask.nii, tmp_Im_mask.nii] -o tmp_ --write-interval-volumes 2 "
+
     # Demons
     # Using Syn
     ants_cmd = f"antsRegistration -d 3 -v 1 -m Demons[ tmp_If.nii, tmp_Im.nii, 1 ] -t SyN[ 0.15, {fluid}, {diffusion} ] \
     -c [ 1000x500x400x300, 1e-6, 10 ] -s {gauss_filt_s}vox -f {reg_level_s} --winsorize-image-intensities [0.05,1.0]\
     -l 1 -u 1 -z 1 -x [tmp_If_mask.nii, tmp_Im_mask.nii] -o [ tmp_, warped_{frame}_{fluid}fluid_{diffusion}diffusion.nii.gz ] "
 
-    os.system(ants_cmd)
+    # Demons
+    # Using bSplineSyn
+    # ants_cmd = f"antsRegistration -d 3 -v 1 -m Demons[ tmp_If.nii, tmp_Im.nii, 1 ] -t BSplineSyN[ 0.2, 26, 0, 3 ] \
+    # -c [ 500x500x250x150, 1e-6, 10 ] -s {gauss_filt_s}vox -f {reg_level_s} --winsorize-image-intensities [0.05,1.0]\
+    # -l 1 -u 1 -z 1 -x [tmp_If_mask.nii, tmp_Im_mask.nii] -o tmp_ --write-interval-volumes 2 "
 
+    # jac_cmd = f"CreateJacobianDeterminantImage 3 tmp_0Warp.nii.gz jacobian_{frame}.nii.gz 1 1"
+    # ijac_cmd = f"CreateJacobianDeterminantImage 3 tmp_0InverseWarp.nii.gz ijacobian_{frame}.nii.gz 1 1"
+
+    # apply_cmd = f"antsApplyTransforms -d 3 -i tmp_Im.nii -o warped_{frame}_{fluid}fluid_{diffusion}diffusion.nii.gz -r tmp_If.nii -t tmp_0Warp.nii.gz"
+    os.system(ants_cmd)
+    # os.system(jac_cmd)
+    # os.system(ijac_cmd)
+    # os.system(apply_cmd)
     M_field = nibabel.load("./tmp_0Warp.nii.gz")
     iM_field = nibabel.load("./tmp_0InverseWarp.nii.gz")
     # print(f"Motion Field Shape (from read): {M_field.shape}")
@@ -177,6 +214,7 @@ def ANTsReg(
     os.remove("./tmp_Im_mask.nii")
     os.remove("./tmp_0Warp.nii.gz")
     os.remove("./tmp_0InverseWarp.nii.gz")
+    os.chdir(cwd)
     return Mt, iMt
 
 
@@ -201,13 +239,12 @@ def regAirlab(fixed_image, moving_image, vox_res=[1, 1, 1]):
     # fixed_image_pyramid = al.create_image_pyramid(fixed_image, [[4, 4, 4], [2, 2, 2]])
     # moving_image_pyramid = al.create_image_pyramid(moving_image, [[4, 4, 4], [2, 2, 2]])
     # del fixed_image, moving_image
-    downsample_factor = [[4, 4, 4], [2, 2, 2], [1, 1, 1]]
-    # smoothing_factor = [[]]
+    downsample_factor = [[6, 6, 6], [2, 2, 2], [1, 1, 1]]
     constant_flow = None
     # regularisation_weight = [1, 1, 1, 1]
     # number_of_iterations = [10, 10, 10]
-    number_of_iterations = [2000, 2000, 2000]
-    sigma = [[2, 2, 2], [1, 1, 1], [0.5, 0.5, 0.5]]
+    number_of_iterations = [5000, 3000, 1000]
+    sigma = [[0.5, 0.5, 0.5], [0.5, 0.5, 0.5], [0.5, 0.5, 0.5]]
     # pixels_per_knot = [[2, 2, 2], [4, 4, 4], [8, 8, 8]]
 
     for level, dsf in enumerate(downsample_factor):
@@ -268,7 +305,6 @@ def regAirlab(fixed_image, moving_image, vox_res=[1, 1, 1]):
     inv_displacement = al.create_displacement_image_from_image(transformation.get_inverse_displacement(), moving_image)
     inv_displacement = al.transformation.utils.unit_displacement_to_displacement(inv_displacement)
 
-    del constant_flow, registration, optimizer, image_loss, transformation
     th.cuda.empty_cache()
     # return np.squeeze(displacement.numpy()), np.squeeze(inv_displacement.numpy())
     return displacement, inv_displacement
@@ -402,12 +438,14 @@ def Demons(
 
 ## interpolation operator
 class interp_op(Linop):
-    def __init__(self, ishape, M_field, iM_field=None):
+    def __init__(self, ishape, M_field, inv_field=None):
         ndim = M_field.shape[-1]
+        # print(list(ishape))
+        # print(list(M_field.shape[:-1]))
         assert list(ishape) == list(M_field.shape[:-1]), "Dimension mismatch!"
         oshape = ishape
         self.M_field = M_field
-        self.iM_field = iM_field
+        self.inv_field = inv_field
         super().__init__(oshape, ishape)
 
     def _apply(self, input):
@@ -418,14 +456,14 @@ class interp_op(Linop):
 
     def _adjoint_linop(self):
         device = backend.get_device(input)
-        if self.iM_field is None:
-            iM_field = -self.M_field
+        if self.inv_field is None:
+            inv_field = -self.M_field
             M_field = None
         else:
-            iM_field = self.iM_field
+            inv_field = self.inv_field
             M_field = self.M_field
 
-        return interp_op(self.ishape, iM_field, M_field)
+        return interp_op(self.ishape, inv_field, M_field)
 
 
 def interp(I, M_field, device=sp.Device(-1), k_id=1, deblur=True):
@@ -476,3 +514,35 @@ def interp(I, M_field, device=sp.Device(-1), k_id=1, deblur=True):
     I = sp.to_device(input=I, device=c_device)
 
     return I
+
+
+class interp_al_op(Linop):
+    def __init__(self, ishape, M_field, iM_field=None, vox_res=[1, 1, 1]):
+        assert list(ishape) == list(list(M_field.shape)[:-1]), "Dimension mismatch!"
+        oshape = ishape
+        self.M_field = M_field
+        self.iM_field = iM_field
+        self.vox_res = vox_res
+        super().__init__(oshape, ishape)
+
+    def _apply(self, input):
+        device = backend.get_device(input)
+
+        with device:
+            dtype = th.float32
+            th_device = th.device("cuda:0")
+            input_d = sp.to_device(input)
+            input_d = al.image_from_numpy(input_d, self.vox_res, [0, 0, 0], dtype=dtype, device=th_device)
+            warped_im = al.transformation.utils.warp_image(input_d, self.M_field)
+            return sp.to_device(warped_im.numpy(), device)
+
+    def _adjoint_linop(self):
+        if self.iM_field is None:
+            iM_field = -self.M_field
+            M_field = None
+        else:
+            # swap fields
+            iM_field = self.iM_field
+            M_field = self.M_field
+
+        return interp_al_op(self.ishape, iM_field, M_field)

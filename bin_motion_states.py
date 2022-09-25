@@ -103,24 +103,10 @@ def bin_periodically(ksp_in, coord_in, dcf_in, resp_in, n_bins, diagnostics_dir)
     prominence = 0.5
     peak_idx, p_prop = find_peaks(resp, prominence=prominence)
     valley_idx, v_prop = find_peaks(resp * -1, prominence=prominence)
-    # print(peak_idx.size)
-    # print(valley_idx.size)
-    # Ensure only one valley per peak
-    # if peak_idx.size <= valley_idx.size:
-    #     n_idxs = peak_idx.size - 1
-    # else:
-    #     n_idxs = valley_idx.size
+
     if peak_idx.size < valley_idx.size:
         valley_idx = valley_idx[:-1]
-    # n_idxs = valley_idx.size
-    # for k in range(n_idxs - 2):
-    #     idx = np.where((valley_idx > peak_idx[k]) & (valley_idx < peak_idx[k + 1]))
-    #     n_valleys = np.size(idx)
-    #     if n_valleys != 1:
-    #         if n_valleys < 1:
-    #             print("do something")
-    #         elif n_valleys > 1:
-    #             print("do something else")
+
     resp_smol = resp[1000:5000]
     peak_idx_smol, _ = find_peaks(resp_smol, prominence=prominence)
     valley_idx_smol, _ = find_peaks(resp_smol * -1, prominence=prominence)
@@ -130,7 +116,6 @@ def bin_periodically(ksp_in, coord_in, dcf_in, resp_in, n_bins, diagnostics_dir)
     plt.savefig(diagnostics_dir + "resp_peaks_valleys.png")
     plt.legend()
     plt.grid()
-    # plt.show()
     plt.close()
     bins = n_bins * np.ones_like(resp)
     # Need to check first location is a minima or maxima
@@ -138,7 +123,6 @@ def bin_periodically(ksp_in, coord_in, dcf_in, resp_in, n_bins, diagnostics_dir)
         s_idx = 0
     else:
         s_idx = 1
-    # Filter based on max amplitude ( if smaller than X, throw away) ** Prominence may do this for me.
 
     # find the amplitude between peak and the base(minima)
     min_amp = 0.2
@@ -153,8 +137,7 @@ def bin_periodically(ksp_in, coord_in, dcf_in, resp_in, n_bins, diagnostics_dir)
         ):
             amp_left = resp[peak_idx[k]] - resp[valley_idx[k + s_idx]]
             amp_right = resp[peak_idx[k + 1]] - resp[valley_idx[k + s_idx]]
-            # print(amp_left)
-            # print(amp_right)
+
             # find the number of data points between peak and the base(minima)
             n_left = valley_idx[k + s_idx] - peak_idx[k]
             n_right = peak_idx[k + 1] - valley_idx[k + s_idx]
@@ -408,7 +391,7 @@ def bin_motion_states(
 
 
 if __name__ == "__main__":
-    sub_dir = "/home/ltorres/data/rawdata/nicu/"
+    sub_dir = "/home/ltorres/data/rawdata/ipf/"
     ignored = ["Original Subjects"]
     subjects = [x for x in os.listdir(sub_dir) if x not in ignored]
     subjects.sort()
@@ -419,7 +402,7 @@ if __name__ == "__main__":
         coord = np.load(f"/home/ltorres/data/rawdata/nicu/{subject}/coord.npy")
         dcf = np.load(f"/home/ltorres/data/rawdata/nicu/{subject}/dcf.npy")
         resp = np.load(f"/home/ltorres/data/rawdata/nicu/{subject}/resp.npy")
-        n = 8
+        n = 6
         diagnostics_dir = f"/home/ltorres/data/recon/nicu/{subject}/diagnostics_run_external/"
 
         print("Binning data...")

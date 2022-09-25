@@ -7,11 +7,18 @@ import matplotlib.pyplot as plt
 import numpy as np
 import re
 
-sub_dir = "/home/ltorres/data/recon/nicu/"
-subjects = ["P099_Exam1", "P122_Exam1", "P173_Exam3", "P179_Exam1"]
+sub_dir = "/data/data_mrcv2/FAIN_GROUP/FainLab/recon/ipf/"
+subjects = ["103-005", "103-010", "103-038", "103-039", "103-042"]
 for subject in subjects:
-    mypath = "/home/ltorres/data/recon/nicu/{}/SoftGate_run0/".format(subject)
-    diagnostics_path = "/home/ltorres/data/recon/nicu/{}/diagnostics_run0/".format(subject)
+    # Search for visits here
+    visits = os.listdir(os.path.join(sub_dir, subject + "/mri/"))
+    visits.sort()
+    # print(visits)
+    visits = visits[0]
+    visits = [visits] if isinstance(visits, str) else visits
+    for visit in visits:
+        mypath = "/data/data_mrcv2/FAIN_GROUP/FainLab/recon/ipf/{}/mri/{}/PreContrastSoftGate_run2/".format(subject, visit)
+        diagnostics_path = "/data/data_mrcv2/FAIN_GROUP/FainLab/recon/ipf/{}/mri/{}/diagnostics_run2/".format(subject, visit)
     files = [f for f in listdir(mypath) if isfile(join(mypath, f))]
     files = sorted(files)
     print(files)
@@ -28,36 +35,36 @@ for subject in subjects:
         focus_measures.append(fm)
         noises.append(noise)
         # print(re.findall('\d*\.?\d+',filename))
-        decay_const.append(float(re.findall("\d*\.?\d+", filename)[0]))
+        decay_const.append(float(re.findall('\d*\.?\d+',filename)[0]))
     # print(decay_const[:])
     plt.plot(decay_const, focus_measures)
-    plt.title(f"{subject} Sharpness vs Decay Constant")
-    plt.xlabel("Decay Constant")
+    plt.title(f"{subject} focus measures vs Decay Constant")
+    plt.xlabel("decay_constant Parameter")
     plt.ylabel("Sharpness")
-    plt.savefig(diagnostics_path + "sharpness_vs_decay_constant_softgating.png")
+    plt.savefig(diagnostics_path + "focus_measures_vs_decay_constant.png")
     # plt.show()
     plt.close()
 
     plt.plot(decay_const, noises)
     plt.title("Noise vs Decay Constant")
-    plt.xlabel("Decay Constant")
+    plt.xlabel("decay_constant Parameter")
     plt.ylabel("Noise StdDev")
-    plt.savefig(diagnostics_path + "image_noise_vs_decay_constant_softgating.png")
+    plt.savefig(diagnostics_path + "image_noise_vs_decay_constant.png")
     # plt.show()
     plt.close()
 
     plt.plot(decay_const[1:], np.diff(np.array(focus_measures)) / np.diff(np.array(noises)))
-    plt.title(r"$\frac{\delta Sharpness}{\delta Noise} vs  Decay Constant$")
-    plt.xlabel("Decay Constant")
+    plt.title("d_focus measure / d_Noise vs Decay Constant")
+    plt.xlabel("decay_constant Parameter")
     plt.ylabel("Sharpness/Noise")
-    plt.savefig(diagnostics_path + "normalized_sharpness_vs_decay_constant_softgating.png")
+    plt.savefig(diagnostics_path + "normalized_focus_measures_vs_decay_constant.png")
     # plt.show()
     plt.close()
 
     plt.plot(np.array(noises), np.array(focus_measures))
-    plt.title("Sharpness vs Noise")
+    plt.title("Noise vs fm")
     plt.xlabel("Noise Std Dev")
     plt.ylabel("Sharpness")
-    plt.savefig(diagnostics_path + "sharpness_vs_image_noise_softgating.png")
+    plt.savefig(diagnostics_path + "focus_measures_vs_image_noise.png")
     # plt.show()
     plt.close()

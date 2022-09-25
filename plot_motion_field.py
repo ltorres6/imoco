@@ -14,19 +14,19 @@ def animate(num, scale, sl, qr, mot_field, dim1, dim2, im, img):
     return qr, im
 
 
-sub_dir = "/home/ltorres/data/rawdata/nicu/"
-ignored = ["Original Subjects"]
+sub_dir = "/home/ltorres/data/rawdata/ipf/"
+ignored = []
 subjects = [x for x in os.listdir(sub_dir) if x not in ignored]
 subjects.sort()
-run = "run_external"
+
 try:
     for subject in subjects:
         # subject = "P179_Exam1"
         print(subject)
-        file_dir = f"/home/ltorres/data/recon/nicu/{subject}/IterativeMoCo_{run}"
-        mr_dir = f"/home/ltorres/data/recon/nicu/{subject}/MotionResolved_{run}"
-        diagnostics_dir = f"/home/ltorres/data/recon/nicu/{subject}/diagnostics_{run}"
-        img = np.flipud(np.swapaxes(nib.load(os.path.join(mr_dir, "MotionResolved0.050.nii.gz")).get_fdata(), 0, 2))
+        file_dir = f"/home/ltorres/data/recon/ipf/{subject}/IterativeMoCo_run0"
+        mr_dir = f"/home/ltorres/data/recon/ipf/{subject}/MotionResolved_run0"
+        diagnostics_dir = f"/home/ltorres/data/recon/nicu/{subject}/diagnostics_run0"
+        img = np.flipud(np.swapaxes(nib.load(os.path.join(mr_dir, "MotionResolved0.01.nii.gz")).get_fdata(), 0, 2))
 
         mot_field = nib.load(os.path.join(file_dir, f"diagnostics/iM_mr.nii.gz")).get_fdata()
         mot_field = np.flipud(
@@ -55,7 +55,7 @@ try:
             np.sqrt(mot_field[::scale, sl, ::scale, dim1, 0] ** 2 + mot_field[::scale, sl, ::scale, dim2, 0] ** 2),
             scale_units="xy",
             scale=1,
-            alpha=0.9,
+            alpha=0.8,
         )
 
         anim = animation.FuncAnimation(
@@ -64,5 +64,4 @@ try:
         # plt.colorbar()
         anim.save(os.path.join(diagnostics_dir, "motion_fields.gif"), writer="imagemagick", fps=6)
 except:
-    print("something went wrong")
     pass

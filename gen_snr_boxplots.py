@@ -54,7 +54,7 @@ ax8.set(xlabel=None, ylabel="CNR", title="Liver CNR")
 ax9.set(xlabel=None, ylabel="CNR", title="Aorta CNR")
 
 # plt.show()
-fig_path = "/home/ltorres/projects/motion_compensation_nicu/figures/"
+fig_path = "/home/ltorres/projects/motion_compensation_ipf/figures/"
 fig1.savefig(fig_path + "airway_snr.png", dpi=300)
 fig2.savefig(fig_path + "lung_snr.png", dpi=300)
 fig3.savefig(fig_path + "muscle_snr.png", dpi=300)
@@ -70,27 +70,41 @@ df_imoco = df[df.image_type == "IterativeMoCo"]
 df_xdgrasp = df[df.image_type == "MotionResolved"]
 df_nogate = df[df.image_type == "NoGate"]
 df_softgate = df[df.image_type == "SoftGate"]
-df_moco = df[df.image_type == "MoCo"]
+# df_moco = df[df.image_type == "MoCo"]
 
-# Hardgated vsi imoco
-t_test_results = st.ttest_ind(
-    df_hard_gating[df_hard_gating.region == "Lung"].snr, df_imoco[df_imoco.region == "Lung"].snr
-)
-print(f"hard gating vs imoco lung snr {t_test_results}")
-t_test_results = st.ttest_ind(
-    df_hard_gating[df_hard_gating.region == "Lung"].cnr, df_imoco[df_imoco.region == "Lung"].cnr
-)
-print(f"hard gating vs imoco lung cnr {t_test_results}")
+# # Hardgated vsi imoco
+# t_test_results = st.ttest_ind(
+#     df_hard_gating[df_hard_gating.region == "Lung"].snr, df_imoco[df_imoco.region == "Lung"].snr
+# )
+# print(f"hard gating vs imoco lung snr {t_test_results}")
+# t_test_results = st.ttest_ind(
+#     df_hard_gating[df_hard_gating.region == "Lung"].cnr, df_imoco[df_imoco.region == "Lung"].cnr
+# )
+# print(f"hard gating vs imoco lung cnr {t_test_results}")
 
-# Hardgated vsi motion_resolved
-t_test_results = st.ttest_ind(
-    df_hard_gating[df_hard_gating.region == "Lung"].snr, df_xdgrasp[df_xdgrasp.region == "Lung"].snr
-)
-print(f"hard gating vs xdgrasp lung snr {t_test_results}")
-t_test_results = st.ttest_ind(
-    df_hard_gating[df_hard_gating.region == "Lung"].cnr, df_xdgrasp[df_xdgrasp.region == "Lung"].cnr
-)
-print(f"hard gating vs xdgrasp lung cnr {t_test_results}")
+# # Hardgated vsi motion_resolved
+# t_test_results = st.ttest_ind(
+#     df_hard_gating[df_hard_gating.region == "Lung"].snr, df_xdgrasp[df_xdgrasp.region == "Lung"].snr
+# )
+# print(f"hard gating vs xdgrasp lung snr {t_test_results}")
+# t_test_results = st.ttest_ind(
+#     df_hard_gating[df_hard_gating.region == "Lung"].cnr, df_xdgrasp[df_xdgrasp.region == "Lung"].cnr
+# )
+# print(f"hard gating vs xdgrasp lung cnr {t_test_results}")
 
 
-# Hardgated vsi imoco
+# imoco vsi motion_resolved
+t_test_results = st.ttest_ind(df_xdgrasp[df_xdgrasp.region == "Lung"].cnr, df_imoco[df_imoco.region == "Lung"].cnr)
+print(f"imoco vs xdgrasp lung cnr {t_test_results}")
+
+# imoco vsi  softgate
+t_test_results = st.ttest_ind(df_softgate[df_softgate.region == "Lung"].cnr, df_imoco[df_imoco.region == "Lung"].cnr)
+print(f"imoco vs softgate lung cnr {t_test_results}")
+
+# imoco vsi hardgate
+t_test_results = st.ttest_ind(df_hard_gating[df_hard_gating.region == "Lung"].cnr, df_imoco[df_imoco.region == "Lung"].cnr)
+print(f"imoco vs hardgate lung cnr {t_test_results}")
+
+# imoco vsi hardgate
+t_test_results = st.ttest_ind(df_nogate[df_nogate.region == "Lung"].cnr, df_imoco[df_imoco.region == "Lung"].cnr)
+print(f"imoco vs nogate lung cnr {t_test_results}")

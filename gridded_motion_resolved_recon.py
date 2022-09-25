@@ -14,9 +14,9 @@ def griddedRecon(ksp_in, coord_in, dcf_in, n_bins, device=0):
     sp.Device(device).use()
     xp = sp.Device(device).xp
     if device >= 0:
-        logging.debug("Using GPU...")
+        logging.info("Using GPU...")
     else:
-        logging.debug("Using CPU...")
+        logging.info("Using CPU...")
 
     # Copy input data
     ksp = copy.deepcopy(ksp_in)

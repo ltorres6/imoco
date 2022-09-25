@@ -6,16 +6,17 @@ from tqdm import trange
 import time
 import logging
 import copy
-import matplotlib.pyplot as plt
+
+# import matplotlib.pyplot as plt
 
 
 def gatingWeights(resp, gating_type="hard", percentile=25, decay=1, flip=False):
-    margin = 2.5  # Remove 5% at both ends to threshold robustly.
+    margin = 5  # Remove 5% at both ends to threshold robustly.
     sigma = 1.4628 * np.median(np.abs(resp - np.median(resp)))
     resp = -1 * (resp - np.median(resp)) / sigma
     thresh_extreme = [np.percentile(resp, margin), np.percentile(resp, 100 - margin)]
     idx = (resp >= thresh_extreme[0]) & (resp < thresh_extreme[1])
-    idx_exclude = (resp < thresh_extreme[0]) | (resp >= thresh_extreme[1])
+    idx_exclude = (resp < thresh_extreme[0]) & (resp >= thresh_extreme[1])
     resp_temp = resp[idx]
     # Robust Threshold, exclude extreme values an
     thresh = np.percentile(resp_temp, percentile)
@@ -29,10 +30,6 @@ def gatingWeights(resp, gating_type="hard", percentile=25, decay=1, flip=False):
         W = np.exp(-decay * np.maximum((resp - thresh), 0))
         W[idx_exclude] = 0
         return W
-    elif gating_type == "none":
-        W = np.ones(resp.shape)
-        W[idx_exclude] = 0
-        return W
 
 
 def gatedRecon(
@@ -42,9 +39,9 @@ def gatedRecon(
     sp.Device(device).use()
     xp = sp.Device(device).xp
     if device >= 0:
-        logging.debug("Using GPU...")
+        logging.info("Using GPU...")
     else:
-        logging.debug("Using CPU...")
+        logging.info("Using CPU...")
 
     # Copy input data
     ksp = copy.deepcopy(ksp_in)
@@ -52,27 +49,26 @@ def gatedRecon(
     dcf = copy.deepcopy(dcf_in)
     resp = copy.deepcopy(resp_in)
 
-    logging.debug("Kspace Shape: {}...".format(ksp.shape))
-    logging.debug("trajectory Shape: {}...".format(coord.shape))
-    logging.debug("DCF Shape: {}....".format(dcf.shape))
+    logging.info("Kspace Shape: {}...".format(ksp.shape))
+    logging.info("trajectory Shape: {}...".format(coord.shape))
+    logging.info("DCF Shape: {}....".format(dcf.shape))
 
-    logging.debug("Image Shape Estimate: {}".format(sp.estimate_shape(coord)))
+    logging.info("Image Shape Estimate: {}".format(sp.estimate_shape(coord)))
     nCoils, nSpokes, nReadouts = ksp.shape
 
     img_shape = sp.estimate_shape(coord)
-    logging.info("(Complex) Image Size Estimate: {}MB....".format(np.prod(img_shape) * ksp.itemsize // (1024 * 1024)))
+    logging.info("(Complex) Image Size Estimate: {}MB....".format(np.prod(img_shape)*ksp.itemsize//(1024*1024)))
 
     logging.info("Running Gated Recon Type:{}".format(gating_type))
 
     # Respiratory Gating
     if gating_type == "none":
-        W = gatingWeights(resp, gating_type="none", percentile=gating_thresh, decay=gating_weight, flip=flip)
-        idx = W == 1
-        ksp = ksp[:, idx]
-        coord = coord[idx]
-        dcf = dcf[idx]
+        pass
     elif gating_type == "hard":
         W = gatingWeights(resp, gating_type="hard", percentile=gating_thresh, decay=gating_weight, flip=flip)
+        # plt.plot(resp)
+        # plt.plot(W * resp)
+        # plt.show()
         idx = W == 1
         ksp = ksp[:, idx]
         coord = coord[idx]
@@ -81,7 +77,7 @@ def gatedRecon(
     elif gating_type == "soft":
         W = gatingWeights(resp, gating_type="soft", percentile=gating_thresh, decay=gating_weight, flip=flip)
         W_correct = np.broadcast_to(W[..., None], W.shape + (ksp.shape[2],))
-        dcf *= W_correct
+        dcf = dcf * W_correct
         del W, W_correct
 
     else:

@@ -1,5 +1,4 @@
 import scipy.io as sio
-import matplotlib.pyplot as plt
 
 
 def load_external_binning(in_path):
@@ -14,16 +13,13 @@ def load_external_binning(in_path):
             key = "SoftGating_Phs"
         except FileNotFoundError:
             pass
-    bins_t = bins[key].squeeze()
-    bins = bins_t.copy()
-    bins[(bins_t >= 0.0) & (bins_t < 0.5)] = 0
-    bins[(bins_t >= 7.5) & (bins_t < 8.0)] = 0
-    bins[(bins_t >= 0.5) & (bins_t < 1.5)] = 1
-    bins[(bins_t >= 1.5) & (bins_t < 2.5)] = 2
-    bins[(bins_t >= 2.5) & (bins_t < 3.5)] = 3
-    bins[(bins_t >= 3.5) & (bins_t < 4.5)] = 4
-    bins[(bins_t >= 4.5) & (bins_t < 5.5)] = 5
-    bins[(bins_t >= 5.5) & (bins_t < 6.5)] = 6
-    bins[(bins_t >= 6.5) & (bins_t < 7.5)] = 7
-    bins[(bins_t == 8.0)] = 8
+    bins = bins[key].squeeze()
+    bins[(bins >= 0.0) & (bins < 0.5) | (bins >= 7.5) & (bins < 8.0)] = 0
+    bins[(bins >= 0.5) & (bins < 1.5)] = 1
+    bins[(bins >= 1.5) & (bins < 2.5)] = 2
+    bins[(bins >= 2.5) & (bins < 3.5)] = 3
+    bins[(bins >= 3.5) & (bins < 4.5)] = 4
+    bins[(bins >= 4.5) & (bins < 5.5)] = 5
+    bins[(bins >= 5.5) & (bins < 6.5)] = 6
+    bins[(bins >= 6.5) & (bins < 7.5)] = 7
     return bins

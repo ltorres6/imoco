@@ -28,9 +28,11 @@ def xdgrasp(
     res_scale=1.0,
     lambda_tv=0.05,
     inner_iter=10,
-    outer_iter=25,
+    outer_iter=20,
     device=0,
     tv_device=-1,
+    sigma=0.4,
+    tau=0.4,
 ):
     timeStart = time.time()
     sp.Device(device).use()
@@ -116,15 +118,10 @@ def xdgrasp(
     for p in range(nPhases):
         for c in range(nCoils):
             ksp[p][c] = ksp[p][c] * dcf[p]
-    # dcf = dcf[:, xp.newaxis, ...]
-    # plt.ImagePlot(ksp)
-    # ksp = ksp * dcf
-    # plt.ImagePlot(ksp)
+
     img = np.zeros((nPhases,) + tshape, dtype=np.complex64)
     Y = [np.zeros_like(k) for k in ksp]
     img_0 = np.zeros_like(img)
-    tau = 0.4
-    sigma = 0.4
     logging.info("Running XD-Grasp")
     pbarOuter = trange(outer_iter, leave=True, ncols=80)
     cost_loss = []

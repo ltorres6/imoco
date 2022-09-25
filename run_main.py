@@ -37,8 +37,8 @@ def run(
     imoco_lambdas=[0.05],
     xdgrasp_lambdas=[0.02],
     lowRes_xdgrasp_lambda=0.0075,
-    reference_frames=[0],
-    n_bins=8,
+    reference_frames=[-1],
+    n_bins=6,
     prefix=None,
     postfix=None,
     subject=None,
@@ -58,6 +58,12 @@ def run(
     overwrite_raw=True,
     overwrite_recons=True,
     UID_base=None,
+    fovNReadout=75,
+    fovthresh=0.03,
+    sigma=0.4,
+    tau=0.4,
+    device=0,
+    max_coils=8
 ):
     if postfix is None:
         postfix = ""
@@ -70,27 +76,26 @@ def run(
         # Set to false if using external....
         remove_bulk_motion = False
     compress_coils = True
-    logging.debug(f"Resp Flip {flip_resp}")
+    logging.info(f"Resp Flip {flip_resp}")
     # flip_resp = True
     # use_detrend = False
+
     # set device
-    device = 0
+    # device = 0
 
     # Randomly Generate series numbers
     series_nums = np.random.permutation(5)
 
-    max_coils = 8
     dc_signal = 1
     spokesDSF = 1.0
-    fovthresh = 0.05
-    fovNReadout = 140
     hardgating_weights = [hardgating_weights] if isinstance(hardgating_weights, float) else hardgating_weights
     softgating_decays = [softgating_decays] if isinstance(softgating_decays, float) else softgating_decays
     imoco_lambdas = [imoco_lambdas] if isinstance(imoco_lambdas, float) else imoco_lambdas
     xdgrasp_lambdas = [xdgrasp_lambdas] if isinstance(xdgrasp_lambdas, float) else xdgrasp_lambdas
     reference_frames = [reference_frames] if isinstance(reference_frames, int) else reference_frames
 
-    logging.debug("Low Res XDGRASP Lambda: {}".format(lowRes_xdgrasp_lambda))
+    logging.info("Low Res XDGRASP Lambda: {}".format(lowRes_xdgrasp_lambda))
+    tv_device = 0
 
     timei = time.time()
     # print(visit)
@@ -120,35 +125,10 @@ def run(
     Path(raw_dir).mkdir(parents=True, exist_ok=True)
 
     fileList = os.listdir(raw_dir)
-    if "MRI_Raw.h5" in fileList:
-        logging.debug("File Exists, Begin!")
+    if "MRI_Raw.h5" in fileList or "ksp.npy" in fileList:
+        logging.info("File Exists, Begin!")
     else:
-        if all(v is not None for v in [subject, visit, study, prefix]):
-            logging.debug("File Does Not Exist, Trying to Pull!")
-            if prefix.lower().startswith("Pre"):
-                prefix_short = "Pre"
-            elif prefix.lower().startswith("Post"):
-                prefix_short = "Post"
-            else:
-                pass
-
-            subprocess.call(
-                [
-                    "/export/home/ltorres/projects/motion_compensation_ipf/copyData.sh",
-                    "lat205",
-                    subject,
-                    visit,
-                    prefix_short,
-                    study,
-                ]
-            )
-        else:
-            pass
-
-    # Skip if file still doesn't exist.
-    fileList = os.listdir(raw_dir)
-    if "MRI_Raw.h5" not in fileList:
-        logging.warn("File Does Not Exist, Skipping!")
+        logging.info("File Does Not Exist, Skipping!")
         return
 
     # Set up data paths
@@ -170,6 +150,7 @@ def run(
     # 1) Convert MRI_Raw.h5 to cfl and read resp waveform.
     if os.path.isfile(ksp_file) is False or overwrite_raw is True:
         logging.info("Loading and Saving.....")
+        logging.info("Running File Conversion...")
         # ksp, coord, dcf, resp, tr = convertUTE(h5Path, max_coils, dsfSpokes=spokesDSF)
         ksp, coord, dcf, resp, tr = convert_ute.convert_ute(
             h5Path, max_coils=max_coils, dsfSpokes=spokesDSF, compress_coils=compress_coils
@@ -190,17 +171,19 @@ def run(
         np.save(resp_file, resp)
         np.save(tr_file, tr)
     else:
-        logging.debug("Loading Data")
+        logging.info("Loading Data")
         ksp = np.load(ksp_file)
         coord = np.load(coord_file)
         dcf = np.load(dcf_file)
-        resp = np.load(resp_file)
+        try:
+            resp = np.load(resp_file)
+        except:
+            "resp doesn't exist, setting dc_flag=1"
+            dc_signal = 1
         tr = np.load(tr_file)
     # Scale DCF for improved convergence
     dcf **= 0.5
-    if subject in ["P006_Exam1"]:
-        for i in range(3):
-            coord[:, :, i] = -coord[:, :, i]
+    ksp /= np.abs(ksp).max()
     # Read Affine Transformation
     # header = read_pcvipr_header(raw_dir)
     # affine_t = np.array(
@@ -213,15 +196,21 @@ def run(
     # )
     affine_t = np.eye(4)
 
-    logging.debug("Kspace Shape: {}...".format(ksp.shape))
-    logging.debug("trajectory Shape: {}...".format(coord.shape))
-    logging.debug("DCF Shape: {}....".format(dcf.shape))
-    logging.debug(f"Repetition Time: {tr} seconds")
+    logging.info("Kspace Shape: {}...".format(ksp.shape))
+    logging.info("trajectory Shape: {}...".format(coord.shape))
+    logging.info("DCF Shape: {}....".format(dcf.shape))
+    logging.info(f"Repetition Time: {tr} seconds")
 
     if dc_signal == 1:
         logging.info("Estimating Resp Waveform from DC signal...")
         logging.info("Using TR: {} seconds".format(tr))
-        [resp, dc] = estimate_resp(ksp[:, :, 0], tr, fl=0.1, fh=1.2, fw=0.01, usePhase=False)
+        [resp, dc] = estimate_resp(ksp[:, :, 0], tr, fl=0.02, fh=0.4, fw=0.01, usePhase=False)
+
+        # if subject in ["103-017", "103-033"]:
+        #     logging.info("LOWER THRESH")
+        #     [resp, dc] = estimate_resp(ksp[:, :, 0], tr, fl=0.02, fh=0.4, fw=0.01, usePhase=False)
+        # else:
+        #     [resp, dc] = estimate_resp(ksp[:, :, 0], tr, fl=0.1, fh=1.2, fw=0.01, usePhase=False)
         if flip_resp:
             dc *= -1
         # [resp, dc] = estimate_respSavitzkyGolay(
@@ -328,7 +317,7 @@ def run(
                         flip=False,
                     )
                 except:
-                    logging.warn("GPU memory exceeded or otherwise failed on GPU. Trying CPU.")
+                    logging.info("GPU memory exceeded or otherwise failed on GPU. Trying CPU.")
                     imgSoftGate = gatedRecon(
                         ksp,
                         coord,
@@ -348,6 +337,8 @@ def run(
 
     # Bin Motion States
     ksp, coord, dcf = bin_periodically(ksp, coord, dcf, resp, n_bins, diagnostics_dir)
+
+    # 6) Bin Motion States
     # logging.info("Running bin_motion_states...")
     # ksp, coord, dcf = bin_motion_states(
     #     ksp,
@@ -361,6 +352,7 @@ def run(
     #     external=use_external,
     #     external_path=raw_dir,
     # )
+
     del resp
 
     if do_gridded_motion_resolved:
@@ -390,6 +382,8 @@ def run(
                 lambda_tv=lowRes_xdgrasp_lambda,
                 device=device,
                 tv_device=0,
+                sigma=sigma,
+                tau=tau,
             )
             # mrimgL = sp.resize(mrimg, (n_bins, 192, 192, 192))
             # mrimgL = normalize(np.moveaxis(np.abs(mrimgL), 0, -1), 0, 255)
@@ -404,17 +398,16 @@ def run(
         Path(iterativeMocoDir).mkdir(parents=True, exist_ok=True)
         for reference_frame in reference_frames[::-1]:
             for imoco_lambda in imoco_lambdas[::-1]:
-                imgPath = os.path.join(iterativeMocoDir, f"iMoCo{imoco_lambda:.2f}_frame{reference_frame}.nii.gz")
+                imgPath = os.path.join(iterativeMocoDir, f"iMoCo{imoco_lambda:.2f}_frame{reference_frame}.nii.gz",)
                 dicomDir = os.path.join(iterativeMocoDir, f"series_{series_nums[3]}")
                 if os.path.isfile(imgPath) is False or overwrite_recons is True:
                     logging.info("Running iMoCo Reconstruction...")
-                    logging.debug(f"Using Reference Frame {reference_frame}")
-                    register_imoco = 1
+                    logging.info(f"Using Reference Frame {reference_frame}")
                     try:
                         mrimg = np.load(mrimgLPath)
                     except Exception:
                         logging.error("Could not read low res xd-grasp reconstruction")
-
+                    register_imoco = 1
                     img = imoco(
                         ksp,
                         coord,
@@ -429,14 +422,16 @@ def run(
                         device=device,
                         nRef=reference_frame,
                         reg_flag=register_imoco,
-                        diffusion_reg=0.5,
+                        diffusion_reg=0.0,
+                        sigma=sigma,
+                        tau=tau,
                     )
                     img = normalize(sp.resize(np.abs(img), (256, 256, 256)), 0, 255)
                     img = nib.Nifti1Image(img, np.eye(4))
                     nib.save(img, imgPath)
                     writeDicoms(imgPath, dicomDir, UID_base=UID_base, subject_id=subject_id, series_num=series_nums[3])
                     del img, mrimg
-                    th.cuda.empty_cache()
+                    # th.cuda.empty_cache()
 
     # 10) Full Res xdgrasp recon
     if do_HighRes:
@@ -449,21 +444,30 @@ def run(
             if os.path.isfile(mrimgPath) is False or overwrite_recons is True:
                 logging.info("Running Full Res XDGrasp Reconstruction...")
                 mrimg = xdgrasp(
-                    ksp, coord, dcf, motionResolvedDir, res_scale=1.0, lambda_tv=xdgrasp_lambda, device=device, tv_device=0,
+                    ksp,
+                    coord,
+                    dcf,
+                    motionResolvedDir,
+                    res_scale=1.0,
+                    lambda_tv=xdgrasp_lambda,
+                    device=device,
+                    tv_device=tv_device,
+                    sigma=sigma,
+                    tau=tau,
                 )
                 mrimg = normalize(np.moveaxis(np.abs(mrimg), 0, -1), 0, 255)
                 mrimg = np.transpose(mrimg, (2, 1, 0, 3))
                 mrimg = np.flip(mrimg, (0, 1, 2))
                 mrimg = sp.resize(mrimg, (256, 256, 256, n_bins))
                 mrimg = nib.Nifti1Image(mrimg, affine_t)
-                mrimg_exp = nib.Nifti1Image(mrimg.get_fdata()[..., -1], affine_t)
+                mrimg_exp = nib.Nifti1Image(mrimg.get_fdata()[..., 0], affine_t)
                 nib.save(mrimg, mrimgPath)
                 nib.save(mrimg_exp, mrimg_expPath)
                 writeDicoms(mrimg_expPath, dicomDir, UID_base=UID_base, subject_id=subject_id, series_num=series_nums[4])
                 del mrimg, mrimg_exp
                 cp._default_memory_pool.free_all_blocks()
 
-    del ksp, coord, dcf
+        del ksp, coord, dcf
 
     # 11) Full Res MoCo Expiratory
     if do_MoCoExp:
@@ -475,8 +479,14 @@ def run(
                 imgPath = os.path.join(mocoDir, f"MoCo{xdgrasp_lambda:.3f}_frame{reference_frame}.nii.gz")
                 if os.path.isfile(imgPath) is False or overwrite_recons is True:
                     logging.info(f"Running MoCo Registrations")
-                    logging.debug(f"Using Reference Frame {reference_frame}")
-                    imgMoco = moco(mrimgPath, diagnostics_dir, nRef=reference_frame)
+                    logging.info(f"Using Reference Frame {reference_frame}")
+                    imgMoco = moco(
+                        mrimgPath,
+                        mf_dir=f"{motionResolvedDir}/diagnostics/",
+                        nRef=reference_frame,
+                        reg_flag=1,
+                        res_scale=1.0,
+                    )
                     imgMoco = nib.Nifti1Image(normalize(imgMoco, 0, 255), affine_t)
                     nib.save(imgMoco, imgPath)
                     writeDicoms(imgPath, dicomDir, UID_base=UID_base, subject_id=subject_id, series_num=series_nums[5])
@@ -509,8 +519,8 @@ if __name__ == "__main__":
             logging.StreamHandler(sys.stdout),
         ],
     )
-    logging.debug(f"Reference Frames: {args.reference_frames}")
-    logging.debug(f"Running: {args.raw_dir}")
+    logging.info(f"Reference Frames: {args.reference_frames}")
+    logging.info(f"Running: {args.raw_dir}")
     run(
         args.raw_dir,
         args.out_dir,

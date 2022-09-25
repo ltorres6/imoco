@@ -1,8 +1,4 @@
 import sigpy as sp
-import numpy as np
-import os
-from sigpy.linop import Linop
-from sigpy import backend
 
 __all__ = ["NFTs"]
 
@@ -42,19 +38,19 @@ def Diags(L_Linop, oshape, ishape):
     return Linops
 
 
-def DLD(Linop, device=sp.Device(-1)):
-    B1 = sp.linop.ToDevice(Linop.ishape, idevice=sp.Device(-1), odevice=device)
-    B2 = sp.linop.ToDevice(Linop.oshape, idevice=sp.Device(-1), odevice=device)
+def DLD(Linop, device=sp.Device(-1), idevice=sp.Device(-1)):
+    B1 = sp.linop.ToDevice(Linop.ishape, idevice=idevice, odevice=device)
+    B2 = sp.linop.ToDevice(Linop.oshape, idevice=idevice, odevice=device)
     Linop = B2.H * Linop * B1
     return Linop
 
 
-def NFTs(ishape, coord, device=sp.Device(-1)):
+def NFTs(ishape, coord, device=sp.Device(-1), idevice=sp.Device(-1)):
     n_Channel = ishape[0]
     oshape = list((n_Channel,)) + list(coord.shape[:-1])
 
     NFT = sp.linop.NUFFT(ishape[1:], coord=coord)
-    NFTs = Diags([DLD(NFT, device=device) for i in range(n_Channel)], oshape, ishape)
+    NFTs = Diags([DLD(NFT, device=device, idevice=idevice) for i in range(n_Channel)], oshape, ishape)
 
     #     B1 = sp.linop.ToDevice(NFT.ishape,idevice=sp.Device(-1),odevice=device)
     #     B2 = sp.linop.ToDevice(NFT.oshape,idevice=sp.Device(-1),odevice=device)
