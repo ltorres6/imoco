@@ -2,7 +2,7 @@ import numpy as np
 import logging
 
 
-def pcaCoilCompression(kdata=None, axis=0, target_channels=None):
+def pca_cc(kdata=None, axis=0, target_channels=None):
 
     logger = logging.getLogger("PCA_CoilCompression")
 

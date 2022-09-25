@@ -54,16 +54,26 @@ def run(
 
     # set device
     device = 0
-    nBins = 8
+    nBins = 6
     max_coils = 8
     dc_signal = 1
     spokesDSF = 1.0
     fovthresh = 0.08
     fovNReadout = 70
-    softgating_decays = [softgating_decays] if isinstance(softgating_decays, float) else softgating_decays
-    imoco_lambdas = [imoco_lambdas] if isinstance(imoco_lambdas, float) else imoco_lambdas
-    xdgrasp_lambdas = [xdgrasp_lambdas] if isinstance(xdgrasp_lambdas, float) else xdgrasp_lambdas
-    reference_frames = [reference_frames] if isinstance(reference_frames, int) else reference_frames
+    softgating_decays = (
+        [softgating_decays]
+        if isinstance(softgating_decays, float)
+        else softgating_decays
+    )
+    imoco_lambdas = (
+        [imoco_lambdas] if isinstance(imoco_lambdas, float) else imoco_lambdas
+    )
+    xdgrasp_lambdas = (
+        [xdgrasp_lambdas] if isinstance(xdgrasp_lambdas, float) else xdgrasp_lambdas
+    )
+    reference_frames = (
+        [reference_frames] if isinstance(reference_frames, int) else reference_frames
+    )
 
     lowRes_xdgrasp_lambda = 0.0075
     logging.info("Low Res XDGRASP Lambda: {}".format(lowRes_xdgrasp_lambda))
@@ -124,7 +134,10 @@ def run(
         logging.info("Running File Conversion...")
         # ksp, coord, dcf, resp, tr = convertUTE(h5Path, max_coils, dsfSpokes=spokesDSF)
         ksp, coord, dcf, resp, tr = convert_ute(
-            h5Path, max_coils=max_coils, dsfSpokes=spokesDSF, compress_coils=compress_coils
+            h5Path,
+            max_coils=max_coils,
+            dsfSpokes=spokesDSF,
+            compress_coils=compress_coils,
         )
         try:
             os.remove(ksp_file)
@@ -170,7 +183,13 @@ def run(
         logging.info("Using TR: {} seconds".format(tr))
         # resp = estimate_resp(ksp[:, :, 0], tr, fl=0.1, fh=1.5, fw=0.01, usePhase=False)
         resp = estimate_respSavitzkyGolay(
-            ksp[:, :, 0], tr, window=1.0, order=2, detrend_window=10.0, usePhase=False, useDetrend=True,
+            ksp[:, :, 0],
+            tr,
+            window=1.0,
+            order=2,
+            detrend_window=10.0,
+            usePhase=False,
+            useDetrend=True,
         )
     if flip_resp:
         resp *= -1
@@ -194,7 +213,14 @@ def run(
     # 2) AutoFOV to reduce matrix size
     logging.info("Running AutoFOV...")
     coord = autofov(
-        ksp, coord, dcf ** 2, diagnostics_dir, num_ro=fovNReadout, thresh=fovthresh, device=device, radial=False,
+        ksp,
+        coord,
+        dcf**2,
+        diagnostics_dir,
+        num_ro=fovNReadout,
+        thresh=fovthresh,
+        device=device,
+        radial=False,
     )
 
     # 6) Bulk filter
@@ -205,7 +231,9 @@ def run(
     # 3) noGating Recon
     if do_noGating:
         Path(noGateDir).mkdir(parents=True, exist_ok=True)
-        imgNoGate = gatedRecon(ksp, coord, dcf, resp, gating_type="none", device=device, flip=flip_resp)
+        imgNoGate = gatedRecon(
+            ksp, coord, dcf, resp, gating_type="none", device=device, flip=flip_resp
+        )
         imgNoGate = normalize(sp.resize(np.abs(imgNoGate), (256, 256, 256)), 0, 255)
         imgNoGate = nib.Nifti1Image(imgNoGate, affine_t)
         nib.save(imgNoGate, imgNoGatePath)
@@ -215,7 +243,14 @@ def run(
     if do_HardGating:
         Path(hardGateDir).mkdir(parents=True, exist_ok=True)
         imgHardGate = gatedRecon(
-            ksp, coord, dcf, resp, gating_type="hard", gating_thresh=50, device=device, flip=flip_resp
+            ksp,
+            coord,
+            dcf,
+            resp,
+            gating_type="hard",
+            gating_thresh=50,
+            device=device,
+            flip=flip_resp,
         )
         imgHardGate = normalize(sp.resize(np.abs(imgHardGate), (256, 256, 256)), 0, 255)
         imgHardGate = nib.Nifti1Image(imgHardGate, affine_t)
@@ -227,7 +262,9 @@ def run(
         Path(softGateDir).mkdir(parents=True, exist_ok=True)
         for softgating_decay in softgating_decays[::-1]:
             if len(softgating_decays) != 1:
-                imgSoftGatePath = os.path.join(softGateDir, "softGate{}.nii.gz".format(softgating_decay))
+                imgSoftGatePath = os.path.join(
+                    softGateDir, "softGate{}.nii.gz".format(softgating_decay)
+                )
             imgSoftGate = gatedRecon(
                 ksp,
                 coord,
@@ -239,7 +276,9 @@ def run(
                 device=-device,
                 flip=flip_resp,
             )
-            imgSoftGate = normalize(sp.resize(np.abs(imgSoftGate), (256, 256, 256)), 0, 255)
+            imgSoftGate = normalize(
+                sp.resize(np.abs(imgSoftGate), (256, 256, 256)), 0, 255
+            )
             imgSoftGate = nib.Nifti1Image(imgSoftGate, affine_t)
             nib.save(imgSoftGate, imgSoftGatePath)
             del imgSoftGate
@@ -290,7 +329,10 @@ def run(
             logging.info(f"Using Reference Frame {reference_frame}")
             counter = 0
             for imoco_lambda in imoco_lambdas[::-1]:
-                imgPath = os.path.join(iterativeMocoDir, f"iMoCo{imoco_lambda}_frame{reference_frame}.nii.gz")
+                imgPath = os.path.join(
+                    iterativeMocoDir,
+                    f"iMoCo{imoco_lambda}_frame{reference_frame}.nii.gz",
+                )
                 if counter != 0:
                     register_imoco = 0
                 else:
@@ -354,8 +396,13 @@ def run(
         Path(motionResolvedDir).mkdir(parents=True, exist_ok=True)
         for xdgrasp_lambda in xdgrasp_lambdas[::-1]:
             if len(xdgrasp_lambdas) != 1:
-                mrimgPath = os.path.join(motionResolvedDir, "MotionResolved{}.nii.gz".format(xdgrasp_lambda))
-                mrimg_expPath = os.path.join(motionResolvedDir, "MotionResolved_exp{}.nii.gz".format(xdgrasp_lambda))
+                mrimgPath = os.path.join(
+                    motionResolvedDir, "MotionResolved{}.nii.gz".format(xdgrasp_lambda)
+                )
+                mrimg_expPath = os.path.join(
+                    motionResolvedDir,
+                    "MotionResolved_exp{}.nii.gz".format(xdgrasp_lambda),
+                )
             logging.info("Running Full Res XDGrasp Reconstruction...")
             mrimg = xdgrasp(
                 ksp,
@@ -404,20 +451,48 @@ if __name__ == "__main__":
     parser.add_argument("raw_dir", type=str, help="raw data directory")
     parser.add_argument("out_dir", type=str, help="desired output directory")
     parser.add_argument(
-        "--postfix", type=str, default="", help="add a string to directories. Useful for different runs"
+        "--postfix",
+        type=str,
+        default="",
+        help="add a string to directories. Useful for different runs",
     )
-    parser.add_argument("--softgating_decay", type=float, default=1.5, help="Softgating exponential decay constant")
-    parser.add_argument("--imoco_lambda", type=float, default=0.05, help="iMoCo TGV regularization parameter")
-    parser.add_argument("--xdgrasp_lambda", type=float, default=0.025, help="XD-GRASP TV regularization parameter")
-    parser.add_argument("--reference_frames", type=int, nargs="+", default=-1, help="Registration Reference Frame")
+    parser.add_argument(
+        "--softgating_decay",
+        type=float,
+        default=1.5,
+        help="Softgating exponential decay constant",
+    )
+    parser.add_argument(
+        "--imoco_lambda",
+        type=float,
+        default=0.05,
+        help="iMoCo TGV regularization parameter",
+    )
+    parser.add_argument(
+        "--xdgrasp_lambda",
+        type=float,
+        default=0.025,
+        help="XD-GRASP TV regularization parameter",
+    )
+    parser.add_argument(
+        "--reference_frames",
+        type=int,
+        nargs="+",
+        default=-1,
+        help="Registration Reference Frame",
+    )
     args = parser.parse_args()
-    Path(args.out_dir + f"/diagnostics{args.postfix}/").mkdir(parents=True, exist_ok=True)
+    Path(args.out_dir + f"/diagnostics{args.postfix}/").mkdir(
+        parents=True, exist_ok=True
+    )
     logging.basicConfig(
         format="%(asctime)s,%(msecs)d %(name)s %(levelname)s %(message)s",
         datefmt="%H:%M:%S",
         level=logging.INFO,
         handlers=[
-            logging.FileHandler(args.out_dir + f"/diagnostics{args.postfix}/recon_log.txt", mode="a"),
+            logging.FileHandler(
+                args.out_dir + f"/diagnostics{args.postfix}/recon_log.txt", mode="a"
+            ),
             logging.StreamHandler(sys.stdout),
         ],
     )

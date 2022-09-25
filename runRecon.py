@@ -6,7 +6,7 @@ os.environ["MKL_NUM_THREADS"] = cores  # export MKL_NUM_THREADS=6
 os.environ["VECLIB_MAXIMUM_THREADS"] = cores  # export VECLIB_MAXIMUM_THREADS=4
 os.environ["NUMEXPR_NUM_THREADS"] = cores  # export NUMEXPR_NUM_THREADS=6
 import nibabel as nib
-from convertUTE import convertUTE
+from convert_ute import convert_ute
 from autofov import autofov
 from estimate_resp import estimate_resp
 from binMotionStates import binMotionStates
