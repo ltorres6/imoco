@@ -6,8 +6,12 @@ from sigpy.linop import Linop
 from sigpy import backend
 import scipy.ndimage as ndimage
 from scipy.io import loadmat
+from skimage.exposure import match_histograms
+import torch as th
+from normalize import normalize
+import airlab as al
 
-__all__ = ["interp_op", "interp", "ANTsReg", "ANTsAff", "interp_affine_op"]
+__all__ = ["interp_op", "interp", "ANTsReg", "regAirlab", "ANTsAff", "interp_affine_op"]
 
 
 def M_scale2(M, oshape, scale=1):
@@ -108,50 +112,166 @@ def ANTsReg4(Is, ref=0):
     np.save("./iM_field.npy", np.asarray(iM_fields))
 
 
-def ANTsReg(If, Im, vox_res=[1, 1, 1], reg_level=[8, 4, 2], gauss_filt=[2, 2, 1]):
+def ANTsReg(
+    If,
+    Im,
+    fixed_mask,
+    moving_mask,
+    vox_res=[1, 1, 1],
+    reg_level=[8, 4, 2, 1],
+    gauss_filt=[6, 4, 2, 0],
+    frame=None,
+    fluid=0.0,
+    diffusion=2.0,
+    diagnostics_dir=None,
+):
+    os.environ["ITK_GLOBAL_DEFAULT_NUMBER_OF_THREADS"] = str(12)
+
     # transfer to nifti
     Ifnft = nibabel.Nifti1Image(If, affine=np.diag(vox_res + [1]))
     Imnft = nibabel.Nifti1Image(Im, affine=np.diag(vox_res + [1]))
+    fixed_mask = nibabel.Nifti1Image(fixed_mask.astype(np.int8), affine=np.diag(vox_res + [1]))
+    moving_mask = nibabel.Nifti1Image(moving_mask.astype(np.int8), affine=np.diag(vox_res + [1]))
 
     nibabel.save(Ifnft, "./tmp_If.nii")
     nibabel.save(Imnft, "./tmp_Im.nii")
+    nibabel.save(fixed_mask, "./tmp_If_mask.nii")
+    nibabel.save(moving_mask, "./tmp_Im_mask.nii")
 
     reg_level_s = "x".join([str(t) for t in reg_level])
     gauss_filt_s = "x".join([str(t) for t in gauss_filt])
+
     # Demons
-    ants_cmd = "antsRegistration -d 3 -v 0 -m Demons[ {}, {}, 1, 4 ] -t SyN[ 0.1, 5, 3 ] \
-    -c [ 100x100x100, 1e-6, 10 ] -s {}vox -f {} --winsorize-image-intensities [0.1,1.0]\
-    -l 1 -u 1 -z 1 -o tmp_".format(
-        "tmp_Im.nii", "tmp_If.nii", gauss_filt_s, reg_level_s
-    )
-    # Demons Smaller regularization
-    # ants_cmd = "antsRegistration -d 3 -m Demons[ {}, {}, 1, 4 ] -t SyN[ 0.1, 3, 3 ] \
-    # -c [ 100x100x40, 1e-6, 10 ] -s {}vox -f {} --winsorize-image-intensities [0.1,1]\
-    # -l 1 -u 1 -o tmp_".format(
-    #     "tmp_Im.nii", "tmp_If.nii", gauss_filt_s, reg_level_s
-    # )
-    # Mutual Information
-    # ants_cmd = "antsRegistration -d 3 -m MI[ {}, {}, 1, 32, regular, 0.25 ] -t SyN[ 0.1, 3, 3 ] \
-    # -c [ 100x100x40, 1e-6, 10 ] -s {}vox -f {} --winsorize-image-intensities [0.1,1]\
-    # -l 1 -u 1 -v 0 -o tmp_".format(
-    #     "tmp_Im.nii", "tmp_If.nii", gauss_filt_s, reg_level_s
-    # )
+    # Using Syn
+    ants_cmd = f"antsRegistration -d 3 -v 1 -m Demons[ tmp_If.nii, tmp_Im.nii, 1 ] -t SyN[ 0.15, {fluid}, {diffusion} ] \
+    -c [ 1000x500x400x300, 1e-6, 10 ] -s {gauss_filt_s}vox -f {reg_level_s} --winsorize-image-intensities [0.05,1.0]\
+    -l 1 -u 1 -z 1 -x [tmp_If_mask.nii, tmp_Im_mask.nii] -o [ tmp_, warped_{frame}_{fluid}fluid_{diffusion}diffusion.nii.gz ] "
+
     os.system(ants_cmd)
+
     M_field = nibabel.load("./tmp_0Warp.nii.gz")
     iM_field = nibabel.load("./tmp_0InverseWarp.nii.gz")
-    os.remove("./tmp_If.nii")
-    os.remove("./tmp_Im.nii")
-    Mt = -M_field.get_data()
-    iMt = -iM_field.get_data()
+    # print(f"Motion Field Shape (from read): {M_field.shape}")
+
+    Mt = M_field.get_data()
+    iMt = iM_field.get_data()
+    # X and Y need to be flipped?
     Mt[..., :2] = -Mt[..., :2]
     iMt[..., :2] = -iMt[..., :2]
     Mt = np.squeeze(Mt)
     iMt = np.squeeze(iMt)
-    # Mt = ndimage.zoom(Mt,zoom=(If.shape[0]/Mt.shape[0],If.shape[1]/Mt.shape[1],If.shape[2]/Mt.shape[2],1))
-    # iMt = ndimage.zoom(iMt,zoom=(If.shape[0]/iMt.shape[0],If.shape[1]/iMt.shape[1],If.shape[2]/iMt.shape[2],1))
-    Mt = M_scale(Mt, If.shape, 1 / reg_level[-1])
-    iMt = M_scale(iMt, If.shape, 1 / reg_level[-1])
+
+    # scale by voxel resolution and final resolution scale
+    scale = 1 / reg_level[-1]
+    Mt = M_scale(Mt, If.shape, scale * (1 / vox_res[-1]))
+    iMt = M_scale(iMt, If.shape, scale * (1 / vox_res[-1]))
+
+    # # # Warp with sigpy and compare to ANTs warped output to verify same transformation is occuring.
+    # warped = interp(Im, Mt)
+    # warped = nibabel.Nifti1Image(warped, np.diag(vox_res + [1]))
+    # nibabel.save(warped, f"warped_{frame}_sigpy.nii.gz")
+
+    os.remove("./tmp_If.nii")
+    os.remove("./tmp_Im.nii")
+    os.remove("./tmp_If_mask.nii")
+    os.remove("./tmp_Im_mask.nii")
+    os.remove("./tmp_0Warp.nii.gz")
+    os.remove("./tmp_0InverseWarp.nii.gz")
     return Mt, iMt
+
+
+def regAirlab(fixed_image, moving_image, vox_res=[1, 1, 1]):
+    # set the used data type
+    dtype = th.float32
+    # set the device for the computaion to CPU
+    # device = th.device("cpu")
+
+    # In order to use a GPU uncomment the following line. The number is the device index of the used GPU
+    # Here, the GPU with the index 0 is used.
+    device = th.device("cuda:0")
+
+    fixed_image = normalize(fixed_image, 0, 1)
+    moving_image = normalize(moving_image, 0, 1)
+    moving_image = match_histograms(moving_image, fixed_image)
+    fixed_image = al.image_from_numpy(fixed_image, vox_res, [0, 0, 0], dtype=dtype, device=device)
+    moving_image = al.image_from_numpy(moving_image, vox_res, [0, 0, 0], dtype=dtype, device=device)
+
+    # create image pyramide size/4, size/2, size/1
+    # ds_factors = [8, 4, 2, 1]
+    # fixed_image_pyramid = al.create_image_pyramid(fixed_image, [[4, 4, 4], [2, 2, 2]])
+    # moving_image_pyramid = al.create_image_pyramid(moving_image, [[4, 4, 4], [2, 2, 2]])
+    # del fixed_image, moving_image
+    downsample_factor = [[4, 4, 4], [2, 2, 2], [1, 1, 1]]
+    # smoothing_factor = [[]]
+    constant_flow = None
+    # regularisation_weight = [1, 1, 1, 1]
+    # number_of_iterations = [10, 10, 10]
+    number_of_iterations = [2000, 2000, 2000]
+    sigma = [[2, 2, 2], [1, 1, 1], [0.5, 0.5, 0.5]]
+    # pixels_per_knot = [[2, 2, 2], [4, 4, 4], [8, 8, 8]]
+
+    for level, dsf in enumerate(downsample_factor):
+        fix_im_level = al.create_downsampled_image(fixed_image, dsf)
+        mov_im_level = al.create_downsampled_image(moving_image, dsf)
+        # registration = al.PairwiseRegistration(verbose=True)
+        registration = al.DemonsRegistraion(verbose=False)
+        # print(level)
+        # define the transformation
+        # transformation = al.transformation.pairwise.BsplineTransformation(
+        #     mov_im_level.size, sigma=pixels_per_knot[level], order=3, dtype=dtype, device=device, diffeomorphic=True
+        # )
+        transformation = al.transformation.pairwise.NonParametricTransformation(
+            mov_im_level.size, dtype=dtype, device=device, diffeomorphic=True
+        )
+        if level > 0:
+            constant_flow = al.transformation.utils.upsample_displacement(
+                constant_flow, mov_im_level.size, interpolation="linear"
+            )
+            transformation.set_constant_flow(constant_flow)
+
+        registration.set_transformation(transformation)
+
+        # choose the Mean Squared Error as image loss
+        image_loss = al.loss.pairwise.MSE(fix_im_level, mov_im_level)
+
+        registration.set_image_loss([image_loss])
+        # choose a regulariser for the demons
+        regulariser = al.regulariser.demons.GaussianRegulariser(
+            mov_im_level.spacing, sigma=sigma[level], dtype=dtype, device=device
+        )
+        registration.set_regulariser([regulariser])
+
+        # # define the regulariser for the displacement
+        # regulariser = al.regulariser.displacement.DiffusionRegulariser(mov_im_level.spacing)
+        # regulariser.set_weight(regularisation_weight[level])
+        # registration.set_regulariser_displacement([regulariser])
+
+        # define the optimizer
+        optimizer = th.optim.Adam(transformation.parameters())
+
+        registration.set_optimizer(optimizer)
+        registration.set_number_of_iterations(number_of_iterations[level])
+
+        registration.start()
+
+        constant_flow = transformation.get_flow()
+        # del image_loss, regulariser
+        # plt.ImagePlot(transformation.get_displacement().cpu().numpy())
+        # plt.ImagePlot(transformation.get_inverse_displacement().cpu().numpy())
+
+    # create final result
+    displacement = transformation.get_displacement()
+    displacement = al.create_displacement_image_from_image(transformation.get_displacement(), fixed_image)
+    displacement = al.transformation.utils.unit_displacement_to_displacement(displacement)
+
+    inv_displacement = transformation.get_inverse_displacement()
+    inv_displacement = al.create_displacement_image_from_image(transformation.get_inverse_displacement(), moving_image)
+    inv_displacement = al.transformation.utils.unit_displacement_to_displacement(inv_displacement)
+
+    del constant_flow, registration, optimizer, image_loss, transformation
+    th.cuda.empty_cache()
+    # return np.squeeze(displacement.numpy()), np.squeeze(inv_displacement.numpy())
+    return displacement, inv_displacement
 
 
 ## Demons registration
@@ -347,8 +467,8 @@ def interp(I, M_field, device=sp.Device(-1), k_id=1, deblur=True):
 
     g_device = device
     I = sp.to_device(input=I, device=g_device)
-    I = sp.interp.interpolate(I, k_wid, kernel, M_field.astype(np.float64))
-    # I = sp.interp.interpolate(I, sp.to_device(M_field, g_device))
+    # I = sp.interp.interpolate(I, k_wid, kernel, M_field.astype(np.float64))
+    I = sp.interp.interpolate(I, sp.to_device(M_field.astype(np.float64), g_device))
 
     # deconv
     if deblur is True:

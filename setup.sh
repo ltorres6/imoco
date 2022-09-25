@@ -15,7 +15,8 @@ export img=$1/img.h5
 export grd=$1/grd.npy
 
 export resp=$1/resp.npy
-export mrimg=$1/mrimg.npy
+# export mrimg=$1/mrimg.npy
+export mrimg=$1/mrimg.nii.gz
 export sgw=$1/sgw.npy
 export sgimg=$1/sgimg.h5
 echo "Completed Setup Successfully"

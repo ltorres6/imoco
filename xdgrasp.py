@@ -28,16 +28,16 @@ def xdgrasp(
     res_scale=1.0,
     lambda_tv=0.05,
     inner_iter=10,
-    outer_iter=20,
+    outer_iter=25,
     device=0,
     tv_device=-1,
 ):
     timeStart = time.time()
     sp.Device(device).use()
     if device >= 0:
-        logging.info("Using GPU...")
+        logging.debug("Using GPU...")
     else:
-        logging.info("Using CPU...")
+        logging.debug("Using CPU...")
     save_iter_slice = True
 
     # Copy input data
@@ -47,11 +47,11 @@ def xdgrasp(
 
     # As lists, list has len of n_bins
     # (n_bins, n_coils, n_projections, n_readouts)
-    logging.info("Kspace Shape: {}...".format(ksp[0].shape))
+    logging.debug("Kspace Shape: {}...".format(ksp[0].shape))
     # (n_bins, n_projections, n_readouts, n_dim)
-    logging.info("trajectory Shape: {}...".format(coord[0].shape))
+    logging.debug("trajectory Shape: {}...".format(coord[0].shape))
     # (n_bins, n_projections, n_readouts)
-    logging.info("DCF Shape: {}....".format(dcf[0].shape))
+    logging.debug("DCF Shape: {}....".format(dcf[0].shape))
 
     nf_arr = np.sqrt(np.sum(coord[0][0, :, :] ** 2, axis=1))
     nReadouts = np.sum(nf_arr < np.max(nf_arr) * res_scale)
@@ -61,7 +61,7 @@ def xdgrasp(
     coord = [bin_data[:, :nReadouts, :] for bin_data in coord]
     dcf = [bin_data[..., :nReadouts] for bin_data in dcf]
 
-    logging.info("Image Shape Estimate: {}".format(sp.estimate_shape(coord[0])))
+    logging.debug("Image Shape Estimate: {}".format(sp.estimate_shape(coord[0])))
     nPhases = len(ksp)
     nCoils, nSpokes, nReadouts = ksp[0].shape
 
@@ -91,33 +91,16 @@ def xdgrasp(
     S = sp.linop.Multiply(tshape, mps)
     del mps
 
-    logging.info("Image Shape: {}....".format(tshape))
-    logging.info("Computing Linops...")
+    logging.debug("Image Shape: {}....".format(tshape))
+    logging.debug("Computing Linops...")
     PFTSs = []
     for ii in range(nPhases):
         FTs = NFTs((nCoils,) + tshape, coord[ii], device=sp.Device(device))
-        W = sp.linop.Multiply(
-            (
-                nCoils,
-                dcf[ii].shape[0],
-                nReadouts,
-            ),
-            dcf[ii],
-        )
+        W = sp.linop.Multiply((nCoils, dcf[ii].shape[0], nReadouts,), dcf[ii],)
         FTSs = W * FTs * S
         PFTSs.append(FTSs)
-    # PFTSs = Diags(
-    #     PFTSs,
-    #     oshape=(
-    #         nPhases,
-    #         nCoils,
-    #         nSpokes,
-    #         nReadouts,
-    #     ),
-    #     ishape=(nPhases,) + tshape,
-    # )
 
-    logging.info("Computing Preconditioner...")
+    logging.debug("Computing Preconditioner...")
     timeI = time.time()
     L = 0
     for p in range(nPhases):
@@ -125,8 +108,8 @@ def xdgrasp(
         # L = np.mean(np.abs(L))
     L = L / (np.prod(tshape) * nPhases)
     timeF = time.time()
-    logging.info("Preconditioner Value: {}".format(L))
-    logging.info("Time for preconditioner: {} seconds.".format(timeF - timeI))
+    logging.debug("Preconditioner Value: {}".format(L))
+    logging.debug("Time for preconditioner: {} seconds.".format(timeF - timeI))
 
     # reconstruction
     # Apply density compensation
@@ -163,14 +146,11 @@ def xdgrasp(
     timeFinish = time.time()
     cost_loss = np.array(cost_loss)
     np.savetxt(
-        os.path.join(
-            diagnostics_dir,
-            "xdgrasp_loss_lambda" + str(lambda_tv) + "_res" + str(res_scale) + ".txt",
-        ),
-        cost_loss,
+        os.path.join(diagnostics_dir, "xdgrasp_loss_lambda" + str(lambda_tv) + "_res" + str(res_scale) + ".txt",), cost_loss,
     )
     logging.info(f"XDGrasp Recon Finished in: {(timeFinish - timeStart) / 60} min...")
-    return sp.to_device(img)
+    img = sp.to_device(img)
+    return img
 
 
 if __name__ == "__main__":
@@ -192,16 +172,7 @@ if __name__ == "__main__":
     coord = np.load(args.coord_file)
     dcf = np.load(args.dcf_file)
 
-    img = xdgrasp(
-        ksp,
-        coord,
-        dcf,
-        args.res_scale,
-        args.lambda_tv,
-        args.inner_iter,
-        args.outer_iter,
-        args.device,
-    )
+    img = xdgrasp(ksp, coord, dcf, args.res_scale, args.lambda_tv, args.inner_iter, args.outer_iter, args.device,)
     print("writing data...")
     # plt.ImagePlot(img)
     cfl.write_cfl(args.img_file, img)

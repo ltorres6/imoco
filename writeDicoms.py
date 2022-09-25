@@ -15,15 +15,11 @@ def convert(img, target_type_min, target_type_max, target_type):
     return new_img
 
 
-def writeSlices(series_tag_values, new_img, path, UID_Base, i):
+def writeSlices(series_tag_values, new_img, path, UID_base, i):
     image_slice = new_img[:, :, i]
 
     # Tags shared by the series.
-    list(
-        map(
-            lambda tag_value: image_slice.SetMetaData(tag_value[0], tag_value[1]), series_tag_values
-        )
-    )
+    list(map(lambda tag_value: image_slice.SetMetaData(tag_value[0], tag_value[1]), series_tag_values))
 
     # Slice specific tags.
     image_slice.SetMetaData("0008|0012", time.strftime("%Y%m%d"))  # Instance Creation Date
@@ -40,7 +36,7 @@ def writeSlices(series_tag_values, new_img, path, UID_Base, i):
     image_slice.SetMetaData("0008|0018", "1.2.3" + str(i))  # Media Storage SOP Instance UID
     image_slice.SetMetaData("0002|0003", "1.2.3" + str(i))  # Media Storage SOP Instance UID
 
-    # image_slice.SetMetaData("0008|1155", UID_Base)  # SOPInstanceUID
+    # image_slice.SetMetaData("0008|1155", UID_base)  # SOPInstanceUID
     # image_slice.SetMetaData("0020|9157", "0\\" + str(i) + "\\0")  # Dimension Index Values
 
     # Write to the output directory and add the extension dcm, to force writing in DICOM format.
@@ -50,7 +46,7 @@ def writeSlices(series_tag_values, new_img, path, UID_Base, i):
     writer.Execute(image_slice)
 
 
-def writeDicoms(imgPath, dicomDir):
+def writeDicoms(imgPath, dicomDir, UID_base, subject_id, series_num):
     pathExist = os.path.isdir(dicomDir)
     if pathExist is False:
         os.makedirs(dicomDir)
@@ -58,20 +54,25 @@ def writeDicoms(imgPath, dicomDir):
     img = nib.load(imgPath).get_fdata()
     # Convert to uint16
     img = convert(img, 0, 65535, "uint16")
-    # Orient Properly
-    img = np.flip(np.flip(np.transpose(img, [2, 1, 0]), axis=1), axis=2)
+    # Check if 3D or 4D
+    if img.ndim == 4:
+        # Orient Properly
+        img = np.flip(np.flip(np.transpose(img, [2, 1, 0, 3]), axis=1), axis=2)
+    else:
+        # Orient Properly
+        img = np.flip(np.flip(np.transpose(img, [2, 1, 0]), axis=1), axis=2)
     # plt.ImagePlot(img)
 
     ishape = img.shape
     img = sitk.GetImageFromArray(img)
     origin = [-1 * (i // 2) for i in ishape]
-    img.SetSpacing([1.25, 1.25, 1.25])
+    img.SetSpacing([0.7, 0.7, 0.7])
     img.SetOrigin(origin)
 
     modification_time = time.strftime("%H%M%S")
     modification_date = time.strftime("%Y%m%d")
     direction = img.GetDirection()
-    UID_Base = "1.2.840.0.1.3680043.2.1125." + modification_date + ".1" + modification_time
+    # UID_base = "1.2.840.0.1.3680043.2.1125." + modification_date + ".1" + modification_time
     # Study -> Series -> Imag
     series_tag_values = [
         ("0002|0002", "1.2.840.10008.5.1.4.1.1.4"),  # Media Storage SOP Class UID
@@ -79,8 +80,8 @@ def writeDicoms(imgPath, dicomDir):
         ("0008|0031", modification_time),  # Series Time
         ("0008|0021", modification_date),  # Series Date
         ("0008|0008", "ORIGINAL\\SECONDARY"),  # Image Type
-        ("0020|000e", UID_Base + ".1"),  # Series Instance UID
-        ("0020|000d", UID_Base),  # Study Instance UID
+        ("0020|000e", UID_base + f".{series_num}"),  # Series Instance UID
+        ("0020|000d", UID_base),  # Study Instance UID
         (
             "0020|0037",
             "\\".join(
@@ -97,20 +98,20 @@ def writeDicoms(imgPath, dicomDir):
                 )
             ),
         ),
-        ("0008|1030", "IPF"),  # Study Description
+        ("0008|1030", "BPD"),  # Study Description
         ("0008|103e", "3D UltraShort Echo Time"),  # Series Description
         ("0025|1007", str(ishape[-1])),  # Images in Series
-        ("0010|0010", "Anon"),  # Patient Name
-        ("0010|0020", "Anon"),  # Patient ID
-        ("0028|0030", "1.25\\1.25"),  # Pixel Spacing
-        ("0018|0088", "1.25"),  # Slice Spacing
-        ("0018,0050", "1.25"),  # Slice Thickness
-        ("0020|0011", "1"),  # Series Number?
-        # ("0020|0012", "1"),  # Acquisition Number
+        ("0010|0010", f"subject_{subject_id}"),  # Patient Name
+        ("0010|0020", f"subject_{subject_id}"),  # Patient ID
+        ("0028|0030", "0.70\\0.70"),  # Pixel Spacing
+        ("0018|0088", "0.70"),  # Slice Spacing
+        ("0018,0050", "0.70"),  # Slice Thickness
+        ("0020|0011", f"{series_num}"),  # Series Number
+        ("0020|0012", "1"),  # Acquisition Number
         ("0018|0020", "GR"),  # Scan Sequence Type (Gradient Recalled)
         ("0018|0021", "SP"),  # Scan Sequence Variant (Spoiled)
         # ("0018|0087", "3T"),  # Field Strength
-        # ("0020|0052", UID_Base + ".5",),  # Frame Of Reference for Series
+        # ("0020|0052", UID_base + ".5",),  # Frame Of Reference for Series
         # ("0028|0008", "1"),  # Number of Frames?
         # ("0008|0070", "GE"),  # Manufacturer
         # ("0008|1090", "Unknown"),  # Manufacturer Model Name
@@ -123,12 +124,11 @@ def writeDicoms(imgPath, dicomDir):
         # ("0008|9206", "VOLUME"),  # Volumetric Properties
         # ("0008,9207", "NONE"),  # Volumetric Properties
         # ("0020,9221", "xx.yy.zz.1"),  # Volumetric Properties
+        # ("0028|0008", "6"),  # Number of Frames
+        # ("0028|0009", "[0020, 0012]"),  # Frame Pointer
+        ("0028|1050", "18000"),  # Window Center
+        ("0028|1051", "26000"),  # Window Width
     ]
 
     # Write slices to output directory
-    list(
-        map(
-            lambda i: writeSlices(series_tag_values, img, dicomDir, UID_Base, i),
-            range(img.GetDepth()),
-        )
-    )
+    list(map(lambda i: writeSlices(series_tag_values, img, dicomDir, UID_base, i), range(img.GetDepth()),))

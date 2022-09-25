@@ -12,31 +12,33 @@ def get_consecutive(data, stepsize=1):
     return np.split(data, np.where(np.diff(data) != stepsize)[0] + 1)
 
 
-def clean_resp(resp, diagnostics_dir, tr, T=10):
+def clean_resp(resp, diagnostics_dir, tr, T=10, z_score = 2.0):
     x_array = np.arange(resp.size)
     N = int(T // tr)
+    N_5 = int(5 // tr)
+    N_lag = int(T//(6*tr))
     resp = pd.Series(resp)
     resp_mean = resp.rolling(N).mean()
     resp_std = resp.rolling(N).std()
     # Use global stdev of rolling stdev to define threshold
-    zscore = 2.5
-    thresh = np.nanmedian(resp_std) + np.nanstd(resp_std) * zscore  # 4 standard deviations should remove the outliers.
+    thresh = np.nanmedian(resp_std) + np.nanstd(resp_std) * z_score  # 4 standard deviations should remove the outliers.
     # print(thresh)
     # Find outilers
-    idx = np.squeeze(np.array(np.where(resp_std > thresh)))
+    idx = np.squeeze(np.array(np.where(resp_std > thresh))) - N_lag
     # print(idx.shape)
     # Now add window size to edge indices to account for delays from edge effects of rolling statistics.
     cons = get_consecutive(idx)
     idx = []
     for ii in range(len(cons)):
-        # Add window length N to excluded indices
-        idx_t = np.arange(cons[ii].min() - N, cons[ii].max() + N)
+        # Add window length N//4 to excluded indices
+        idx_t = np.arange(cons[ii].min() - N_5, cons[ii].max() + N_5)
+        # idx_t = np.arange(cons[ii].min(), cons[ii].max())
         idx = np.concatenate((idx, idx_t))
     # Now clean idx (ensure unique indices and within bounds of projection count)
     idx = np.unique(idx[(idx >= 0) & (idx < resp.size)])
     idx_keep = np.setdiff1d(np.arange(resp.size), idx)
 
-    resp_keep = resp_mean.copy()
+    resp_keep = resp.copy()
     resp_keep[idx] = np.nan
     # Save a diagnostics plot
     fig, ax = plt.subplots(4, constrained_layout=True)
@@ -45,7 +47,7 @@ def clean_resp(resp, diagnostics_dir, tr, T=10):
     ax[1].plot(x_array, resp_mean, "k")
     ax[1].plot(idx, resp_mean.max().repeat(idx.size), "ro", linestyle="None")
     ax[2].plot(x_array, resp_std, "b", label="Rolling std dev")
-    ax[2].plot(x_array, np.repeat(thresh, x_array.size), "r", label="{}*sigma".format(zscore))
+    ax[2].plot(x_array, np.repeat(thresh, x_array.size), "r", label="{}*sigma".format(z_score))
     ax[3].plot(x_array, resp_keep, "b")
     fig.suptitle("Respiratory waveform diagnostics")
 
@@ -85,7 +87,7 @@ def filter_bulk(ksp_in, coord_in, dcf_in, resp_in, tr, diagnostics_dir):
     dcf = copy.deepcopy(dcf_in)
     resp = copy.deepcopy(resp_in)
     n_original = resp.size
-    resp, idx_keep = clean_resp(resp, diagnostics_dir, tr, T=10)
+    resp, idx_keep = clean_resp(resp, diagnostics_dir, tr, T=30, z_score=1.0)
     ksp = ksp[:, idx_keep]
     coord = coord[idx_keep]
     dcf = dcf[idx_keep]

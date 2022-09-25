@@ -1,9 +1,65 @@
 import argparse
 import numpy as np
 from scipy.signal import firls, convolve
+import matplotlib.pyplot as plt
+from scipy.signal import find_peaks
 
 
 def estimate_resp(dc, tr, n=9999, fl=0.1, fh=1.5, fw=0.01, usePhase=False):
+    """Estimate respiratory signal from DC.
+
+    The function performs:
+    1) Filter DC with a band-pass filter with symmetric extension.
+    2) Normalize each channel by a robust estimation of mean and variance.
+    3) Return the channel with the maximum variance.
+
+    Args:
+        dc (array): multi-channel DC array of shape [num_coils, num_tr].
+        tr (float): TR in seconds.
+        n (int): length of band-pass filter.
+        fl (float): lower cut-off of band-pass filter in Hz.
+        fh (float): higher cut-off of band-pass filter in Hz.
+        fw (float): transition width of band-pass filter.
+
+    Returns:
+        array: respiratory signal of length num_tr.
+    """
+    if usePhase:
+        dc = np.unwrap(np.angle(dc))
+    else:
+        pass
+        dc = np.abs(dc)
+    fs = 1 / tr
+    # plot power spectrum
+    # Y = np.abs(np.squeeze(np.fft.rfft(dc)))
+    # f = np.fft.rfftfreq(dc.size, tr)
+    # f = f[1:]
+    # Y = Y[1:]
+    # # peaks, _ = find_peaks(Y, prominence=1)
+    # plt.plot(f, Y)
+    # # plt.plot(peaks, Y[peaks], "xr")
+    # plt.xlim(0.5, 6)
+    # plt.show()
+    # end plot power spectrum
+    bands = [0, fl - fw, fl, fh, fh + fw, fs / 2]
+    desired = [0, 0, 1, 1, 0, 0]
+
+    filt = firls(n, bands, desired, fs=fs)
+    sigma_max = 0
+    for c in range(len(dc)):
+        dc_pad = np.pad(dc[c], [n // 2, n // 2], mode="reflect")
+        resp_c = convolve(dc_pad, filt, mode="valid")
+        sigma_c = 1.4826 * np.median(np.abs(resp_c - np.median(resp_c)))
+
+        if sigma_c > sigma_max:
+            resp = (resp_c - np.median(resp_c)) / sigma_c
+            sigma_max = sigma_c
+            c_selected = c
+
+    return resp, dc[c_selected]
+
+
+def estimate_resp_chamindu(dc, tr):
     """Estimate respiratory signal from DC.
 
     The function performs:
@@ -41,7 +97,9 @@ def estimate_resp(dc, tr, n=9999, fl=0.1, fh=1.5, fw=0.01, usePhase=False):
         if sigma_c > sigma_max:
             resp = (resp_c - np.median(resp_c)) / sigma_c
             sigma_max = sigma_c
-    return resp
+            c_selected = c
+
+    return resp, dc[c_selected]
 
 
 if __name__ == "__main__":

@@ -5,7 +5,25 @@ from tqdm import trange
 import logging
 import time
 import nibabel as nib
-from scipy.ndimage import median_filter
+from scipy.ndimage import gaussian_filter
+from skimage.morphology import ball
+from skimage.filters import threshold_minimum
+from scipy import ndimage
+
+
+def estimate_mask(img_in):
+    # thresh = threshold_otsu(img[img > 0].ravel())
+    img = gaussian_filter(img_in, [1, 1, 1])
+    thresh = threshold_minimum(img.ravel())
+    bg_mask = img >= thresh
+    fill_mask = img == 0
+    strel = ball(1, dtype=np.uint8)
+    # plt2.ImagePlot(bg_mask)
+    bg_mask = ndimage.binary_closing(bg_mask, structure=strel, iterations=10)
+    bg_mask = ndimage.binary_fill_holes(bg_mask, structure=strel)
+    bg_mask = bg_mask + fill_mask
+    # plt2.ImagePlot(bg_mask)
+    return bg_mask
 
 
 def moco(
@@ -13,18 +31,24 @@ def moco(
 ):
     timeStart = time.time()
     #  Load mrimg
-    mrimg = nib.load(mrimgPath).get_fdata()
+    mrimg = np.squeeze(nib.load(mrimgPath).get_fdata())
     mrimg = np.moveaxis(np.abs(mrimg), -1, 0)
     nPhases = mrimg.shape[0]
     tshape = mrimg.shape[1:]
     logging.info("Registration...")
+    vox_res = [0.7] * 3
     M_fields = []
     iM_fields = []
+    fixed_mask = estimate_mask(np.abs(mrimg[nRef]))
     if reg_flag == 1:
         pbar = trange(nPhases, leave=True)
         for ii in pbar:
             pbar.set_description("Registering Frame # {}...".format(ii))
-            M_field, iM_field = reg.ANTsReg(median_filter(np.abs(mrimg[nRef]), 3), median_filter(np.abs(mrimg[ii]), 3))
+            moving_mask = estimate_mask(np.abs(mrimg[nRef]))
+            M_field, iM_field = reg.ANTsReg(np.abs(mrimg[nRef]), np.abs(mrimg[ii]), fixed_mask, moving_mask, vox_res=vox_res)
+            if ii == nRef:
+                M_field.fill(0)
+                iM_field.fill(0)
             M_fields.append(M_field)
             iM_fields.append(iM_field)
         M_fields = np.asarray(M_fields)

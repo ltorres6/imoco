@@ -1,0 +1,1 @@
+This repository hosts a general set of python tools for running motion or temporally binned, XD-GRASP, iMoCo, and hopefully other reconstructions. End result will be a run script with optional parameters which will be useful as a gear for flywheel.

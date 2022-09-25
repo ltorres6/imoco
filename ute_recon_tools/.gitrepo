@@ -1,0 +1,12 @@
+; DO NOT EDIT (unless you know what you are doing)
+;
+; This subdirectory is a git "subrepo", and this file is maintained by the
+; git-subrepo command. See https://github.com/git-commands/git-subrepo#readme
+;
+[subrepo]
+	remote = https://www.medphysics.wisc.edu:4443/intranet/mpgit/FainLab/recons/ute_recon_tools.git
+	branch = master
+	commit = d188d52592937f580542238539af7d5ddd3a7a70
+	parent = 3c66627bd428ea896ab6c95d199b676089b13a45
+	method = merge
+	cmdver = 0.4.3

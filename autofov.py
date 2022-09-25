@@ -42,7 +42,7 @@ def autofov(ksp, coord, dcf, diagnostics_dir, num_ro=100, device=-1, thresh=0.4,
             ro_range = slice(ro_center - num_ro // 2, ro_center + num_ro // 2, 1)
         else:
             ro_range = slice(0, num_ro, 1)
-        logging.info("AutoFov Input Shape: {}".format(sp.estimate_shape(coord)))
+        logging.debug("AutoFov Input Shape: {}".format(sp.estimate_shape(coord)))
 
         kspc = ksp[:, :, ro_range]
         coordc = coord[:, ro_range, :]
@@ -53,7 +53,7 @@ def autofov(ksp, coord, dcf, diagnostics_dir, num_ro=100, device=-1, thresh=0.4,
         imgc_shape = np.array(sp.estimate_shape(coordc))
         imgc2_shape = sp.estimate_shape(coordc2)
         imgc2_center = [i // 2 for i in imgc2_shape]
-        logging.info("Adjoint Nufft 1")
+        logging.debug("Adjoint Nufft 1")
         imgc2 = sp.nufft_adjoint(sp.to_device(dcfc * kspc, device), coordc2, [num_coils] + imgc2_shape)
         imgc2 = xp.sum(xp.abs(imgc2) ** 2, axis=0) ** 0.5
         imgc2 = sp.to_device(imgc2)
@@ -113,7 +113,7 @@ def autofov(ksp, coord, dcf, diagnostics_dir, num_ro=100, device=-1, thresh=0.4,
         coordc = sp.to_device(coordc, device)
         num_coils = len(kspc)
         imgc_shape = sp.estimate_shape(coordc)
-        logging.info("Adjoint Nufft 2")
+        logging.debug("Adjoint Nufft 2")
         imgc = sp.nufft_adjoint(sp.to_device(dcfc * kspc, device), coordc, [num_coils] + imgc_shape)
         imgc = xp.sum(xp.abs(imgc) ** 2, axis=0) ** 0.5
         # plt.ImagePlot(imgc)
@@ -134,7 +134,7 @@ def autofov(ksp, coord, dcf, diagnostics_dir, num_ro=100, device=-1, thresh=0.4,
         ima.save(diagnostics_dir + "autofov_croppedAxial.jpg")
 
         logging.info("AutoFov Output Shape: {}".format(sp.estimate_shape(coord)))
-        logging.info("Scaling Factors: {}".format(img_scale))
+        logging.debug("Scaling Factors: {}".format(img_scale))
         np.savetxt(diagnostics_dir + "fovScaleFactors.txt", img_scale)
 
         # --------------------
@@ -178,7 +178,7 @@ if __name__ == "__main__":
 
     logging.info("Output Image shape: {}".format(sp.estimate_shape(coordOut)))
 
-    logging.info("Saving data.")
+    logging.debug("Saving data.")
     if os.path.isfile(args.coord_file):
         os.remove(args.coord_file)
     np.save(args.coord_file, coordOut)

@@ -48,6 +48,7 @@ def estimate_respSavitzkyGolay(dc, tr, window=0.8, order=2, detrend_window=10.0,
         if sigma_c > sigma_max:
             resp = (resp_c - np.median(resp_c)) / sigma_c
             sigma_max = sigma_c
+            c_selected = c
     resp = resp / resp.max()
 
     if useDetrend is True:
@@ -66,7 +67,7 @@ def estimate_respSavitzkyGolay(dc, tr, window=0.8, order=2, detrend_window=10.0,
         # plt.show()
         # resp = detrend(resp)
 
-    return resp
+    return resp, dc[c_selected]
 
 
 def estimate_resp_bandpass(dc, tr, fl=0.5, fh=1.5, usePhase=False):
