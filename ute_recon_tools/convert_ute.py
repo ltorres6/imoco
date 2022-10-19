@@ -7,6 +7,8 @@ from ute_recon_tools.coil_compression import pca_cc
 import ute_recon_tools.cfl as cfl
 from tqdm import trange
 
+log = logging.getLogger(__name__)
+
 
 def get_cov(noise):
     """Get covariance matrix from noise measurements.
@@ -20,6 +22,7 @@ def get_cov(noise):
     """
     num_coils = noise.shape[0]
     X = noise.reshape([num_coils, -1])
+    X = noise
     X -= np.mean(X, axis=-1, keepdims=True)
     cov = np.matmul(X, X.T.conjugate())
 
@@ -42,22 +45,30 @@ def whiten(ksp, cov):
     x = ksp.reshape([num_coils, -1])
 
     L = np.linalg.cholesky(cov)
-    # Modified since np.linalg.solve can consume a large amount of memory. Verified with np.all_close()
-    n_points = x.shape[-1]
-    n_chunks = 50
-    points_per_chunk = n_points // n_chunks
-    idx = np.arange(0, x.shape[-1], points_per_chunk)
-    idx[-1] = n_points
+    L_inv = np.linalg.inv(L)
+    # # Modified since np.linalg.solve can consume a large amount of memory. Verified with np.all_close()
+    # n_points = x.shape[-1]
+    # n_chunks = 50
+    # points_per_chunk = n_points // n_chunks
+    # idx = np.arange(0, x.shape[-1], points_per_chunk)
+    # idx[-1] = n_points
 
-    x_w = np.empty_like(x)
-    for chunk in trange(n_chunks - 1, ncols=60, desc="Whitening"):
-        x_w[..., idx[chunk] : idx[chunk + 1]] = np.linalg.solve(L, x[..., idx[chunk] : idx[chunk + 1]])
-    ksp_w = x_w.reshape(ksp.shape)
+    # x_w = np.empty_like(x)
+    # for chunk in trange(n_chunks - 1, ncols=60, desc="Whitening"):
+    #     x_w[..., idx[chunk] : idx[chunk + 1]] = np.linalg.solve(
+    #         L, x[..., idx[chunk] : idx[chunk + 1]]
+    #     )
+    # ksp_w = x_w.reshape(ksp.shape)
+    # print(L_inv.shape)
+    # print(ksp.shape)
+    # ksp_W = np.dot(L_inv, ksp)
+    ksp_w = L_inv @ x
+    return ksp_w.reshape(ksp.shape)
 
-    return ksp_w
 
-
-def convert_ute(h5_file, max_coils=8, dsfSpokes=1.0, compress_coils=False):
+def convert_ute(
+    h5_file, max_coils=8, dsfSpokes=1.0, compress_coils=False, pre_whiten=False
+):
 
     with h5py.File(h5_file, "r") as hf:
 
@@ -78,24 +89,24 @@ def convert_ute(h5_file, max_coils=8, dsfSpokes=1.0, compress_coils=False):
                 np.squeeze(hf["Kdata"].attrs["dft_neededZ"]),
             ]
 
-            logging.info(f"Frames {num_frames}")
-            logging.info(f"Coils {num_coils}")
-            logging.info(f"Encodings {num_encodes}")
-            logging.info(f"Trajectory Type {trajectory_type}")
-            logging.info(f"DFT Needed {dft_needed}")
+            log.info(f"Frames {num_frames}")
+            log.info(f"Coils {num_coils}")
+            log.info(f"Encodings {num_encodes}")
+            log.info(f"Trajectory Type {trajectory_type}")
+            log.info(f"DFT Needed {dft_needed}")
 
         except Exception:
-            logging.info("Missing H5 Attributes...")
+            log.info("Missing H5 Attributes...")
 
             num_coils = 0
             while f"KData_E0_C{num_coils}" in hf["Kdata"]:
                 num_coils += 1
-            logging.info(f"Number of coils: {num_coils}")
+            log.info(f"Number of coils: {num_coils}")
 
             num_encodes = 0
             while f"KData_E{num_encodes}_C0" in hf["Kdata"]:
                 num_encodes += 1
-            logging.info(f"Number of encodes: {num_encodes}")
+            log.info(f"Number of encodes: {num_encodes}")
 
         # if max_coils is not None:
         #     num_coils = min(max_coils, num_coils)
@@ -108,9 +119,9 @@ def convert_ute(h5_file, max_coils=8, dsfSpokes=1.0, compress_coils=False):
 
         for encode in range(num_encodes):
 
-            logging.info(f"Loading encode {encode}")
+            log.info(f"Loading encode {encode}")
             # Load timing and resp waveform and sort
-            logging.debug(f"Loading timings and resp signal")
+            log.debug(f"Loading timings and resp signal")
             try:
                 time = np.squeeze(hf["Gating"][f"time"])
                 order = np.argsort(time)
@@ -125,17 +136,17 @@ def convert_ute(h5_file, max_coils=8, dsfSpokes=1.0, compress_coils=False):
                 resp = np.squeeze(hf["Gating"][f"RESP_E{encode}"])
                 resp = resp[order]
 
-            logging.debug("Loading Coordinates")
+            log.debug("Loading Coordinates")
             coord = []
             for i in ["Z", "Y", "X"]:
-                # logging.info(f"Loading {i} coords.")
+                # log.info(f"Loading {i} coords.")
                 coord.append(hf["Kdata"][f"K{i}_E{encode}"][0][order])
             coord = np.stack(coord, axis=-1)
 
-            logging.debug("Loading density compensation function")
+            log.debug("Loading density compensation function")
             dcf = np.array(hf["Kdata"][f"KW_E{encode}"][0][order])
 
-            logging.debug("Loading ECG")
+            log.debug("Loading ECG")
             try:
                 ecg = np.squeeze(hf["Gating"][f"ecg"])
                 ecg = ecg[order]
@@ -146,26 +157,33 @@ def convert_ute(h5_file, max_coils=8, dsfSpokes=1.0, compress_coils=False):
             # Get k-space
             ksp = []
             for c in range(num_coils):
-                logging.debug(f"Loading kspace, coil {c + 1} / {num_coils}.")
+                log.debug(f"Loading kspace, coil {c + 1} / {num_coils}.")
                 ksp.append(
                     hf["Kdata"][f"KData_E{encode}_C{c}"]["real"][0][order]
                     + 1j * hf["Kdata"][f"KData_E{encode}_C{c}"]["imag"][0][order]
                 )
-            logging.debug(f"Stacking as np array...")
+            log.debug(f"Stacking as np array...")
             ksp = np.stack(ksp, axis=0)
-            logging.info("num_coils {}".format(num_coils))
+            log.info("num_coils {}".format(num_coils))
 
             try:
                 noise = hf["Kdata"]["Noise"]["real"] + 1j * hf["Kdata"]["Noise"]["imag"]
-                logging.info("Whitening ksp.")
-                cov = get_cov(noise)
-                ksp = whiten(ksp, cov)
+                if pre_whiten:
+                    log.info("Whitening ksp.")
+                    cov = get_cov(noise)
+                    ksp = whiten(ksp, cov)
+                else:
+                    log.info(f"Scaling k-space by max value: {np.abs(ksp).max()}")
+                    log.debug(f"kspace min: {np.abs(ksp).min()}")
+                    ksp /= np.abs(ksp).max()
+                    log.debug(f"Post scaling max value: {np.abs(ksp).max()}")
+                    log.debug(f"Post scaling min value: {np.abs(ksp).min()}")
             except (MemoryError, Exception) as err:
-                logging.warning(f"{err}. Scaling k-space by max value.")
+                log.warning(f"{err}. Scaling k-space by max value: {np.abs(ksp).max()}")
                 ksp /= np.abs(ksp).max()
 
             if compress_coils:
-                logging.info("Compressing to {} channels.".format(max_coils))
+                log.info("Compressing to {} channels.".format(max_coils))
                 ksp = pca_cc(kdata=ksp, axis=0, target_channels=max_coils)
 
             # Append to list
@@ -176,11 +194,11 @@ def convert_ute(h5_file, max_coils=8, dsfSpokes=1.0, compress_coils=False):
             resps.append(resp)
 
             # Log the data
-            logging.debug(f"MRI coords encode shape: {coords[encode].shape}")
-            logging.debug(f"MRI dcf encode shape: {dcfs[encode].shape}")
-            logging.debug(f"MRI kdata encode shape: {kdata[encode].shape}")
-            logging.debug(f"MRI ecg encode shape: {ecgs[encode].shape}")
-            logging.debug(f"MRI resp encode shape: {resps[encode].shape}")
+            log.debug(f"MRI coords encode shape: {coords[encode].shape}")
+            log.debug(f"MRI dcf encode shape: {dcfs[encode].shape}")
+            log.debug(f"MRI kdata encode shape: {kdata[encode].shape}")
+            log.debug(f"MRI ecg encode shape: {ecgs[encode].shape}")
+            log.debug(f"MRI resp encode shape: {resps[encode].shape}")
 
     # Stack the data along projections (no reason not to keep encodes separate in my case)
     kdata = np.concatenate(kdata, axis=1)
@@ -190,11 +208,11 @@ def convert_ute(h5_file, max_coils=8, dsfSpokes=1.0, compress_coils=False):
     resps = np.concatenate(resps, axis=0)
 
     # crop empty calibration region (1800 spokes for ipf)
-    kdata = kdata[:, :-1800, :]
-    coords = coords[:-1800, :, :]
-    dcfs = dcfs[:-1800, :]
-    resps = resps[:-1800]
-    ecgs = ecgs[:-1800]
+    # kdata = kdata[:, :-1800, :]
+    # coords = coords[:-1800, :, :]
+    # dcfs = dcfs[:-1800, :]
+    # resps = resps[:-1800]
+    # ecgs = ecgs[:-1800]
 
     # crop to desired number of spokes (all by default)
     totalSpokes = kdata.shape[1]
@@ -203,25 +221,29 @@ def convert_ute(h5_file, max_coils=8, dsfSpokes=1.0, compress_coils=False):
     coords = coords[:nSpokes, :, :]
     dcfs = dcfs[:nSpokes, :]
     resps = resps[:nSpokes]
-    logging.info(f"Total Number of Spokes: {totalSpokes}, Requested Number of Spokes: {nSpokes}")
+    log.info(
+        f"Total Number of Spokes: {totalSpokes}, Requested Number of Spokes: {nSpokes}"
+    )
 
     # Log the data
-    logging.info(f"MRI coords final shape: {coords.shape}")
-    logging.info(f"MRI dcf final shape: {dcfs.shape}")
-    logging.info(f"MRI kdata final shape: {kdata.shape}")
-    logging.info(f"MRI ecg final shape: {ecgs.shape}")
-    logging.info(f"MRI resp final shape: {resps.shape}")
+    log.info(f"MRI coords final shape: {coords.shape}")
+    log.info(f"MRI dcf final shape: {dcfs.shape}")
+    log.info(f"MRI kdata final shape: {kdata.shape}")
+    log.info(f"MRI ecg final shape: {ecgs.shape}")
+    log.info(f"MRI resp final shape: {resps.shape}")
 
     # Get TR
     d_time = time[order]
     tr = d_time[1] - d_time[0]
 
-    return kdata, coords, dcfs, resps / resps.max(), tr
+    return kdata, coords, dcfs, resps / resps.max(), tr, noise
 
 
 if __name__ == "__main__":
 
-    parser = argparse.ArgumentParser(description="Converts UWUTE h5 files to npy arrays in natural time ordering.")
+    parser = argparse.ArgumentParser(
+        description="Converts UWUTE h5 files to npy arrays in natural time ordering."
+    )
     parser.add_argument("h5_file", type=str)
     parser.add_argument("ksp_file", type=str)
     parser.add_argument("coord_file", type=str)
@@ -231,19 +253,30 @@ if __name__ == "__main__":
     parser.add_argument("--max_coils", type=int, default=8)
     parser.add_argument("--dsf_spokes", type=float, default=1.0)
     parser.add_argument("--compress_coils", default=False, action="store_true")
-    parser.add_argument("--save_type", type=str, default="numpy")  # 0 = numpy, 1 = cfl, 2 = hdf5, etc...
+    parser.add_argument(
+        "--save_type", type=str, default="numpy"
+    )  # 0 = numpy, 1 = cfl, 2 = hdf5, etc...
     args = parser.parse_args()
-    logging.basicConfig(level=logging.INFO)
+    log.basicConfig(level=log.INFO)
 
     ksp, coord, dcf, resp, tr = convert_ute(
-        args.h5_file, max_coils=args.max_coils, dsfSpokes=args.dsf_spokes, compress_coils=args.compress_coils
+        args.h5_file,
+        max_coils=args.max_coils,
+        dsfSpokes=args.dsf_spokes,
+        compress_coils=args.compress_coils,
     )
-    logging.info("Saving data.")
-    for filename in [args.ksp_file, args.coord_file, args.dcf_file, args.resp_file, args.tr_file]:
+    log.info("Saving data.")
+    for filename in [
+        args.ksp_file,
+        args.coord_file,
+        args.dcf_file,
+        args.resp_file,
+        args.tr_file,
+    ]:
         try:
             os.remove(filename)
         except Exception as e:
-            logging.warning(e)
+            log.warning(e)
             pass
     # if os.path.isfile(args.ksp_file):
     #     os.remove(args.ksp_file)

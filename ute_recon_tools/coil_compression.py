@@ -20,6 +20,9 @@ def pca_cc(kdata=None, axis=0, target_channels=None):
     old_channels = kdata_cc.shape[-1]
     logger.info(f"Old channels =  {old_channels} ")
 
+    if old_channels == target_channels:
+        logger.info(f"Old channels matches new channels. Skipping.")
+        return kdata
     # Subsample to reduce memory for SVD
     mask_shape = np.array(kdata_cc.shape)
     mask = np.random.choice([True, False], size=mask_shape[:-1], p=[0.05, 1 - 0.05])

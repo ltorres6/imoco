@@ -10,6 +10,25 @@ import logging
 import os
 from pathlib import Path
 import copy
+import matplotlib.pyplot as plt
+
+
+def plot_losses(loss_file, diagnostics_dir, name):
+    loss = []
+
+    f = open(loss_file, "r")
+    for row in f:
+        loss.append(float(row))
+
+    plt.plot(loss, color="g", label="File Data")
+
+    plt.xlabel("Iteration", fontsize=12)
+    plt.ylabel("Loss", fontsize=12)
+
+    plt.title("Loss", fontsize=20)
+    plt.legend()
+    plt.savefig(diagnostics_dir + f"{name}.png")
+    plt.close()
 
 
 def save_slice(img, save_dir):
@@ -98,7 +117,14 @@ def xdgrasp(
     PFTSs = []
     for ii in range(nPhases):
         FTs = NFTs((nCoils,) + tshape, coord[ii], device=sp.Device(device))
-        W = sp.linop.Multiply((nCoils, dcf[ii].shape[0], nReadouts,), dcf[ii],)
+        W = sp.linop.Multiply(
+            (
+                nCoils,
+                dcf[ii].shape[0],
+                nReadouts,
+            ),
+            dcf[ii],
+        )
         FTSs = W * FTs * S
         PFTSs.append(FTSs)
 
@@ -136,14 +162,28 @@ def xdgrasp(
             img[p] = img[p] - tau * PFTSs[p].H * Y[p]
         img = np.complex64(ext.TVt_prox(img, lambda_tv))
         timeF = time.time()
-        pbarOuter.set_postfix(loss=np.linalg.norm(img - img_0) / np.linalg.norm(img), time=timeF - timeI)
+        pbarOuter.set_postfix(
+            loss=np.linalg.norm(img - img_0) / np.linalg.norm(img), time=timeF - timeI
+        )
         cost_loss.append(np.linalg.norm(img - img_0) / np.linalg.norm(img))
         img_0 = img.copy()
 
     timeFinish = time.time()
     cost_loss = np.array(cost_loss)
     np.savetxt(
-        os.path.join(diagnostics_dir, "xdgrasp_loss_lambda" + str(lambda_tv) + "_res" + str(res_scale) + ".txt",), cost_loss,
+        os.path.join(
+            diagnostics_dir,
+            "xdgrasp_loss_lambda" + str(lambda_tv) + "_res" + str(res_scale) + ".txt",
+        ),
+        cost_loss,
+    )
+    plot_losses(
+        os.path.join(
+            diagnostics_dir,
+            "xdgrasp_loss_lambda" + str(lambda_tv) + "_res" + str(res_scale) + ".txt",
+        ),
+        diagnostics_dir,
+        "xdgrasp_loss_lambda" + str(lambda_tv) + "_res" + str(res_scale),
     )
     logging.info(f"XDGrasp Recon Finished in: {(timeFinish - timeStart) / 60} min...")
     img = sp.to_device(img)
@@ -157,10 +197,18 @@ if __name__ == "__main__":
     parser.add_argument("coord_file", type=str, help="trajectory file.")
     parser.add_argument("dcf_file", type=str, help="dcf file.")
     parser.add_argument("img_file", type=str, help="img out file.")
-    parser.add_argument("--res_scale", type=float, default=1.0, help="scale of resolution 0-1")
-    parser.add_argument("--lambda_tv", type=float, default=2e-2, help="TV regularization, 0.05")
-    parser.add_argument("--inner_iter", type=int, default=10, help="Num of inner Iterations.")
-    parser.add_argument("--outer_iter", type=int, default=20, help="Num of outer Iterations.")
+    parser.add_argument(
+        "--res_scale", type=float, default=1.0, help="scale of resolution 0-1"
+    )
+    parser.add_argument(
+        "--lambda_tv", type=float, default=2e-2, help="TV regularization, 0.05"
+    )
+    parser.add_argument(
+        "--inner_iter", type=int, default=10, help="Num of inner Iterations."
+    )
+    parser.add_argument(
+        "--outer_iter", type=int, default=20, help="Num of outer Iterations."
+    )
     parser.add_argument("--device", type=int, default=0, help="Computing device.")
     args = parser.parse_args()
 
@@ -169,7 +217,16 @@ if __name__ == "__main__":
     coord = np.load(args.coord_file)
     dcf = np.load(args.dcf_file)
 
-    img = xdgrasp(ksp, coord, dcf, args.res_scale, args.lambda_tv, args.inner_iter, args.outer_iter, args.device,)
+    img = xdgrasp(
+        ksp,
+        coord,
+        dcf,
+        args.res_scale,
+        args.lambda_tv,
+        args.inner_iter,
+        args.outer_iter,
+        args.device,
+    )
     print("writing data...")
     # plt.ImagePlot(img)
     cfl.write_cfl(args.img_file, img)

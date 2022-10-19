@@ -6,6 +6,7 @@ from tqdm import trange
 import time
 import logging
 import copy
+import sigpy.plot as plt
 
 # import matplotlib.pyplot as plt
 
@@ -33,7 +34,15 @@ def gatingWeights(resp, gating_type="hard", percentile=25, decay=1, flip=False):
 
 
 def gatedRecon(
-    ksp_in, coord_in, dcf_in, resp_in, gating_type="none", gating_thresh=50, gating_weight=1.0, device=0, flip=False,
+    ksp_in,
+    coord_in,
+    dcf_in,
+    resp_in,
+    gating_type="none",
+    gating_thresh=50,
+    gating_weight=1.0,
+    device=0,
+    flip=False,
 ):
     timeStart = time.time()
     sp.Device(device).use()
@@ -46,7 +55,7 @@ def gatedRecon(
     # Copy input data
     ksp = copy.deepcopy(ksp_in)
     coord = copy.deepcopy(coord_in)
-    dcf = copy.deepcopy(dcf_in)
+    dcf = copy.deepcopy(dcf_in**2)
     resp = copy.deepcopy(resp_in)
 
     logging.info("Kspace Shape: {}...".format(ksp.shape))
@@ -57,7 +66,11 @@ def gatedRecon(
     nCoils, nSpokes, nReadouts = ksp.shape
 
     img_shape = sp.estimate_shape(coord)
-    logging.info("(Complex) Image Size Estimate: {}MB....".format(np.prod(img_shape)*ksp.itemsize//(1024*1024)))
+    logging.info(
+        "(Complex) Image Size Estimate: {}MB....".format(
+            np.prod(img_shape) * ksp.itemsize // (1024 * 1024)
+        )
+    )
 
     logging.info("Running Gated Recon Type:{}".format(gating_type))
 
@@ -65,7 +78,13 @@ def gatedRecon(
     if gating_type == "none":
         pass
     elif gating_type == "hard":
-        W = gatingWeights(resp, gating_type="hard", percentile=gating_thresh, decay=gating_weight, flip=flip)
+        W = gatingWeights(
+            resp,
+            gating_type="hard",
+            percentile=gating_thresh,
+            decay=gating_weight,
+            flip=flip,
+        )
         # plt.plot(resp)
         # plt.plot(W * resp)
         # plt.show()
@@ -75,7 +94,13 @@ def gatedRecon(
         dcf = dcf[idx]
         del W, idx
     elif gating_type == "soft":
-        W = gatingWeights(resp, gating_type="soft", percentile=gating_thresh, decay=gating_weight, flip=flip)
+        W = gatingWeights(
+            resp,
+            gating_type="soft",
+            percentile=gating_thresh,
+            decay=gating_weight,
+            flip=flip,
+        )
         W_correct = np.broadcast_to(W[..., None], W.shape + (ksp.shape[2],))
         dcf = dcf * W_correct
         del W, W_correct
@@ -86,7 +111,7 @@ def gatedRecon(
     # Reconstruction
     pbarOuter = trange(nCoils, leave=True, ncols=80)
     coord = sp.to_device(coord, device)
-    ksp = ksp * (dcf ** 2)
+    ksp = ksp * dcf
     with sp.Device(device):
         img = 0
         for c in pbarOuter:
@@ -94,9 +119,9 @@ def gatedRecon(
             pbarOuter.set_description(f"{gating_type}Recon - Coil: {c}")
             ksp_c = sp.to_device(ksp[c], device)
             img_c = sp.nufft_adjoint(ksp_c, coord, oshape=img_shape)
-            img = img + sp.to_device(xp.abs(img_c ** 2), -1)
+            img = img + sp.to_device(img_c * xp.conj(img_c), -1)
             pbarOuter.set_postfix(time=(time.time() - timeI) / 60)
-        img = img ** 0.5
+        img = np.abs(np.sqrt(img))
 
     timeFinish = time.time()
     logging.info("Recon Finished in: {} min...".format((timeFinish - timeStart) / 60))
@@ -116,12 +141,23 @@ if __name__ == "__main__":
     parser.add_argument("img_file", type=str, help="img out filepath.")
     parser.add_argument("--device", type=int, default=-1, help="Computing device.")
     parser.add_argument(
-        "--gating_type", type=str, default="none", help="Gating Type. Options are 'none', 'hard','soft'",
+        "--gating_type",
+        type=str,
+        default="none",
+        help="Gating Type. Options are 'none', 'hard','soft'",
     )
     parser.add_argument(
-        "--gating_thresh", type=float, default=50, help="Gating Threshold. Options range from 0.0 to 1.0",
+        "--gating_thresh",
+        type=float,
+        default=50,
+        help="Gating Threshold. Options range from 0.0 to 1.0",
     )
-    parser.add_argument("--gating_weight", type=float, default=1.0, help="Gating weight decay for soft threshold.")
+    parser.add_argument(
+        "--gating_weight",
+        type=float,
+        default=1.0,
+        help="Gating weight decay for soft threshold.",
+    )
     args = parser.parse_args()
 
     # Read in data

@@ -13,7 +13,7 @@ from run_main import run
 # import nibabel as nib
 # import os
 # from normalize import normalize
-sub_dir = "/home/ltorres/data/oe_new_data"
+sub_dir = "/home/ltorres/data/rawdata/iowa_fidall/"
 subjects = os.listdir(sub_dir)
 subjects.sort()
 # subjects = ["20220228"]
@@ -30,21 +30,31 @@ try:
     for subject_id, subject in enumerate(subjects):
         raw_dir = f"/home/ltorres/data/rawdata/iowa_fidall/{subject}/{contrast_type}"
         out_dir = f"/home/ltorres/data/recon/iowa_fidall/{subject}/{contrast_type}"
+        tr = 0.0037
+        np.save(f"/home/ltorres/data/rawdata/iowa_fidall/{subject}/tr.npy", tr)
         Path(out_dir + f"/diagnostics{postfix}/").mkdir(parents=True, exist_ok=True)
         logging.basicConfig(
             format="%(asctime)s,%(msecs)d %(name)s %(levelname)s %(message)s",
             datefmt="%H:%M:%S",
             level=logging.INFO,
             handlers=[
-                logging.FileHandler(out_dir + f"/diagnostics{postfix}/recon_log.txt", mode="a"),
+                logging.FileHandler(
+                    out_dir + f"/diagnostics{postfix}/recon_log.txt", mode="a"
+                ),
                 logging.StreamHandler(sys.stdout),
             ],
         )
         logging.info("Running Subject {}".format(subject))
         if any(s in subject for s in select_subjects):
-            softgating_decays = np.arange(0.0, 1.5, 0.2).tolist()  # To test sharpness metric
-            hardgating_weights = np.arange(0, 100 + 0.001, 5).tolist()  # To test sharpness metric
-            imoco_lambdas = np.arange(0.01, 0.1, 0.01).tolist()  # To test regularization parameter
+            softgating_decays = np.arange(
+                0.0, 1.5, 0.2
+            ).tolist()  # To test sharpness metric
+            hardgating_weights = np.arange(
+                0, 100 + 0.001, 5
+            ).tolist()  # To test sharpness metric
+            imoco_lambdas = np.arange(
+                0.01, 0.1, 0.01
+            ).tolist()  # To test regularization parameter
             xdgrasp_lambdas = [0.01, 0.03, 0.05]
             lowRes_xdgrasp_lambda = 0.04
 
@@ -60,7 +70,9 @@ try:
         # Same UID base for each visit for dicoms
         modification_time = time.strftime("%H%M%S")
         modification_date = time.strftime("%Y%m%d")
-        UID_base = "1.2.840.0.1.3680043.2.1125." + modification_date + ".1" + modification_time
+        UID_base = (
+            "1.2.840.0.1.3680043.2.1125." + modification_date + ".1" + modification_time
+        )
         time_start = time.time()
         run(
             raw_dir,
@@ -93,6 +105,7 @@ try:
             fovthresh=0.1,
             sigma=0.2,
             tau=0.2,
+            max_coils=12,
         )
         time_finish = (time.time() - time_start) / 3600
         try:

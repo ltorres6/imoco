@@ -10,7 +10,7 @@ from normalize import normalize
 
 
 def moco(
-    mrimgPath, fname, nRef=-1, reg_flag=1, res_scale=1.0,
+    mrimgPath, fname, nRef=-1, reg_flag=1, res_scale=1.0, resolution=[1.25, 1.25, 1.25]
 ):
     timeStart = time.time()
     #  Load mrimg
@@ -21,7 +21,7 @@ def moco(
     logging.info("Registration...")
     M_fields = []
     iM_fields = []
-    vox_res = [n * res_scale for n in [1, 1, 1]]
+    vox_res = [r / res_scale for r in resolution]
 
     if reg_flag == 1:
         timei = time.time()
@@ -58,7 +58,9 @@ def moco(
     img = img / nPhases
 
     timeFinish = time.time()
-    logging.info("Moco Registration Finished in: {} min...".format((timeFinish - timeStart) / 60))
+    logging.info(
+        "Moco Registration Finished in: {} min...".format((timeFinish - timeStart) / 60)
+    )
     return img
 
 
@@ -69,10 +71,18 @@ if __name__ == "__main__":
     parser.add_argument("coord_file", type=str, help="coordectory file.")
     parser.add_argument("dcf_file", type=str, help="dcf file.")
     parser.add_argument("img_file", type=str, help="img out file.")
-    parser.add_argument("--res_scale", type=float, default=1.0, help="scale of resolution 0-1")
-    parser.add_argument("--lambda_tv", type=float, default=2e-2, help="TV regularization, 0.05")
-    parser.add_argument("--inner_iter", type=int, default=10, help="Num of inner Iterations.")
-    parser.add_argument("--outer_iter", type=int, default=20, help="Num of outer Iterations.")
+    parser.add_argument(
+        "--res_scale", type=float, default=1.0, help="scale of resolution 0-1"
+    )
+    parser.add_argument(
+        "--lambda_tv", type=float, default=2e-2, help="TV regularization, 0.05"
+    )
+    parser.add_argument(
+        "--inner_iter", type=int, default=10, help="Num of inner Iterations."
+    )
+    parser.add_argument(
+        "--outer_iter", type=int, default=20, help="Num of outer Iterations."
+    )
     parser.add_argument("--device", type=int, default=0, help="Computing device.")
     args = parser.parse_args()
 
@@ -81,7 +91,16 @@ if __name__ == "__main__":
     coord = np.load(args.coord_file)
     dcf = np.load(args.dcf_file)
 
-    img = moco(ksp, coord, dcf, args.res_scale, args.lambda_tv, args.inner_iter, args.outer_iter, args.device,)
+    img = moco(
+        ksp,
+        coord,
+        dcf,
+        args.res_scale,
+        args.lambda_tv,
+        args.inner_iter,
+        args.outer_iter,
+        args.device,
+    )
     print("writing ksp...")
     # plt.ImagePlot(img)
     cfl.write_cfl(args.img_file, img)

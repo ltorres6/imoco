@@ -15,19 +15,45 @@ from scipy import ndimage
 from scipy.ndimage import gaussian_filter
 from skimage import transform
 from skimage.morphology import ball
-from skimage.segmentation import inverse_gaussian_gradient, morphological_geodesic_active_contour
+from skimage.segmentation import (
+    inverse_gaussian_gradient,
+    morphological_geodesic_active_contour,
+)
 from tqdm import trange
 
 from imoco_e import cfl, reg
 from imoco_e.linop_e import DLD, NFTs
 from normalize import normalize
+import matplotlib.pyplot as plt
+
+
+def plot_losses(loss_file, diagnostics_dir, name):
+    loss = []
+
+    f = open(loss_file, "r")
+    for row in f:
+        loss.append(float(row))
+
+    plt.plot(loss, color="g", label="File Data")
+
+    plt.xlabel("Iteration", fontsize=12)
+    plt.ylabel("Loss", fontsize=12)
+
+    plt.title("Loss", fontsize=20)
+    plt.legend()
+    plt.savefig(diagnostics_dir + f"{name}.png")
+    plt.close()
 
 
 def estimate_mask(img_in):
     img = gaussian_filter(img_in, [1] * 3)
     gradient = inverse_gaussian_gradient(img)
     bg_mask = morphological_geodesic_active_contour(
-        gradient, iterations=60, init_level_set=np.ones_like(img), smoothing=1, balloon=-1
+        gradient,
+        iterations=60,
+        init_level_set=np.ones_like(img),
+        smoothing=1,
+        balloon=-1,
     )
     strel = ball(2, dtype=np.uint8)
     bg_mask = ndimage.binary_closing(bg_mask, structure=strel, iterations=10)
@@ -87,6 +113,7 @@ def imoco(
     diffusion_reg=0.1,
     sigma=0.4,
     tau=0.4,
+    resolution=[1.25, 1.25, 1.25],
 ):
     timeStart = time.time()
     sp.Device(device).use()
@@ -151,7 +178,7 @@ def imoco(
     logging.info("Registration...")
     if reg_flag == 1:
         timei = time.time()
-        vox_res = [1.25 / mr_scale] * 3
+        vox_res = [r / mr_scale for r in resolution]
         M_fields = []
         iM_fields = []
         fixed_mask = estimate_mask(normalize(np.abs(mrimg[nRef]), 0, 1))
@@ -165,7 +192,9 @@ def imoco(
                 iM_field = np.zeros(mrimg.shape[1:] + (3,))
             else:
                 moving_mask = estimate_mask(normalize(np.abs(mrimg[ii]), 0, 1))
-                save_mask_diagnostic(moving_mask.astype(float), diagnostics_dir, f"moving_mask_{ii}")
+                save_mask_diagnostic(
+                    moving_mask.astype(float), diagnostics_dir, f"moving_mask_{ii}"
+                )
                 M_field, iM_field = reg.ANTsReg(
                     normalize(gaussian_filter(np.abs(mrimg[nRef]), 0.5), 0, 1),
                     normalize(gaussian_filter(np.abs(mrimg[ii]), 0.5), 0, 1),
@@ -199,7 +228,9 @@ def imoco(
         logging.info("Saving Motion Fields as nii...")
         tmp = np.asarray(M_fields)
         # print(tmp.shape)
-        tmp = np.moveaxis(tmp, 0, -1)  # Move n_phases to last dim (so now should be [nx,ny,nz, ndim, nphases])
+        tmp = np.moveaxis(
+            tmp, 0, -1
+        )  # Move n_phases to last dim (so now should be [nx,ny,nz, ndim, nphases])
         tmp = np.transpose(tmp, (2, 1, 0, 3, 4))
         tmp = np.flip(tmp, (0, 1, 2))
         tmp = nib.Nifti1Image(tmp, np.eye(4))
@@ -226,7 +257,8 @@ def imoco(
         iM_fields = np.flip(iM_fields, (0, 1, 2))
         iM_fields = np.transpose(iM_fields, (2, 1, 0, 3, 4))
         iM_fields = np.moveaxis(iM_fields, -1, 0)
-
+        M_fields = [M_fields[p] for p in range(M_fields.shape[0])]
+        iM_fields = [iM_fields[p] for p in range(iM_fields.shape[0])]
     # Recon
     logging.info("Prep...")
     PFTSMs = []
@@ -235,7 +267,14 @@ def imoco(
         FT = NFTs((nCoils,) + tshape, coord[p], device=sp.Device(device))
         M = reg.interp_op(tshape, iM_fields[p], M_fields[p])
         M = DLD(M, device=sp.Device(device))
-        W = sp.linop.Multiply((nCoils, dcf[p].shape[0], nReadouts,), dcf[p],)
+        W = sp.linop.Multiply(
+            (
+                nCoils,
+                dcf[p].shape[0],
+                nReadouts,
+            ),
+            dcf[p],
+        )
         FTSM = W * FT * S * M
         PFTSMs.append(FTSM)
         # FTs.append(FT)
@@ -300,7 +339,9 @@ def imoco(
         q = q + sigma * TV * img
         q = q / (np.maximum(np.abs(q), alpha) / alpha)
         img = img - tau * (1 / L * accum + lambda_tv * TV.H * q)
-        pbarOuter.set_postfix(loss=np.linalg.norm(img - img_0) / np.linalg.norm(img), time=timeF - timeI)
+        pbarOuter.set_postfix(
+            loss=np.linalg.norm(img - img_0) / np.linalg.norm(img), time=timeF - timeI
+        )
         loss.append(np.linalg.norm(img - img_0) / np.linalg.norm(img))
         img_0 = img.copy()
     img = np.transpose(img, (2, 1, 0))
@@ -309,12 +350,39 @@ def imoco(
     np.savetxt(
         os.path.join(
             diagnostics_dir,
-            "imoco_loss_refFrame" + str(nRef) + "_lambda" + str(lambda_tv) + "_res" + str(res_scale) + ".txt",
+            "imoco_loss_refFrame"
+            + str(nRef)
+            + "_lambda"
+            + str(lambda_tv)
+            + "_res"
+            + str(res_scale)
+            + ".txt",
         ),
         loss,
     )
+    plot_losses(
+        os.path.join(
+            diagnostics_dir,
+            "imoco_loss_refFrame"
+            + str(nRef)
+            + "_lambda"
+            + str(lambda_tv)
+            + "_res"
+            + str(res_scale)
+            + ".txt",
+        ),
+        diagnostics_dir,
+        "imoco_loss_refFrame"
+        + str(nRef)
+        + "_lambda"
+        + str(lambda_tv)
+        + "_res"
+        + str(res_scale),
+    )
     timeFinish = time.time()
-    logging.info("iMoco Recon Finished in: {} hrs...".format((timeFinish - timeStart) / 3600))
+    logging.info(
+        "iMoco Recon Finished in: {} hrs...".format((timeFinish - timeStart) / 3600)
+    )
     return img
 
 
@@ -325,10 +393,18 @@ if __name__ == "__main__":
     parser.add_argument("coord_file", type=str, help="coordectory file.")
     parser.add_argument("dcf_file", type=str, help="dcf file.")
     parser.add_argument("img_file", type=str, help="img out file.")
-    parser.add_argument("--res_scale", type=float, default=1.0, help="scale of resolution 0-1")
-    parser.add_argument("--lambda_tv", type=float, default=2e-2, help="TV regularization, 0.05")
-    parser.add_argument("--inner_iter", type=int, default=10, help="Num of inner Iterations.")
-    parser.add_argument("--outer_iter", type=int, default=20, help="Num of outer Iterations.")
+    parser.add_argument(
+        "--res_scale", type=float, default=1.0, help="scale of resolution 0-1"
+    )
+    parser.add_argument(
+        "--lambda_tv", type=float, default=2e-2, help="TV regularization, 0.05"
+    )
+    parser.add_argument(
+        "--inner_iter", type=int, default=10, help="Num of inner Iterations."
+    )
+    parser.add_argument(
+        "--outer_iter", type=int, default=20, help="Num of outer Iterations."
+    )
     parser.add_argument("--device", type=int, default=0, help="Computing device.")
     args = parser.parse_args()
 
@@ -337,7 +413,16 @@ if __name__ == "__main__":
     coord = np.load(args.coord_file)
     dcf = np.load(args.dcf_file)
 
-    img = imoco(ksp, coord, dcf, args.res_scale, args.lambda_tv, args.inner_iter, args.outer_iter, args.device,)
+    img = imoco(
+        ksp,
+        coord,
+        dcf,
+        args.res_scale,
+        args.lambda_tv,
+        args.inner_iter,
+        args.outer_iter,
+        args.device,
+    )
     print("writing ksp...")
     # plt.ImagePlot(img)
     cfl.write_cfl(args.img_file, img)

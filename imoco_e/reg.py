@@ -96,7 +96,9 @@ def interp_affine(I, T, aff_order=1):
     shift_before_rot = T[3, :]
     shift_after_rot = shift_before_rot.dot(T[:3, :].transpose())
     shift_after_rot = -T[3, :]
-    AT = lambda x: ndimage.affine_transform(x, T[:3, :], offset=-shift_after_rot, order=aff_order)
+    AT = lambda x: ndimage.affine_transform(
+        x, T[:3, :], offset=-shift_after_rot, order=aff_order
+    )
     if np.iscomplexobj(I) is True:
         I_aff = AT(np.real(I)) + 1j * AT(np.imag(I))
     else:
@@ -134,12 +136,16 @@ def ANTsReg(
 ):
     cwd = os.getcwd()
     os.chdir(diagnostics_dir)
-    os.environ["ITK_GLOBAL_DEFAULT_NUMBER_OF_THREADS"] = str(24)
+    os.environ["ITK_GLOBAL_DEFAULT_NUMBER_OF_THREADS"] = str(32)
     # transfer to nifti
     Ifnft = nibabel.Nifti1Image(If, affine=np.diag(vox_res + [1]))
     Imnft = nibabel.Nifti1Image(Im, affine=np.diag(vox_res + [1]))
-    fixed_mask = nibabel.Nifti1Image(fixed_mask.astype(np.int8), affine=np.diag(vox_res + [1]))
-    moving_mask = nibabel.Nifti1Image(moving_mask.astype(np.int8), affine=np.diag(vox_res + [1]))
+    fixed_mask = nibabel.Nifti1Image(
+        fixed_mask.astype(np.int8), affine=np.diag(vox_res + [1])
+    )
+    moving_mask = nibabel.Nifti1Image(
+        moving_mask.astype(np.int8), affine=np.diag(vox_res + [1])
+    )
 
     nibabel.save(Ifnft, "./tmp_If.nii")
     nibabel.save(Imnft, "./tmp_Im.nii")
@@ -169,9 +175,10 @@ def ANTsReg(
     # Demons
     # Using Syn
     ants_cmd = f"antsRegistration -d 3 -v 1 -m Demons[ tmp_If.nii, tmp_Im.nii, 1 ] -t SyN[ 0.15, {fluid}, {diffusion} ] \
-    -c [ 1000x500x400x300, 1e-6, 10 ] -s {gauss_filt_s}vox -f {reg_level_s} --winsorize-image-intensities [0.05,1.0]\
-    -l 1 -u 1 -z 1 -x [tmp_If_mask.nii, tmp_Im_mask.nii] -o [ tmp_, warped_{frame}_{fluid}fluid_{diffusion}diffusion.nii.gz ] "
+    -c [ 1000x500x400x300, 1e-6, 10 ] -s {gauss_filt_s}vox -f {reg_level_s} -w [ 0.05, 1.0 ] \
+    -u 1 -z 1 -x [ tmp_If_mask.nii, tmp_Im_mask.nii ] -o [ tmp_, warped_{frame}_{fluid}fluid_{diffusion}diffusion.nii.gz ]"
 
+    # ants_cmd = f"antsRegistration -d 3 -v 1 -m Demons[ tmp_If.nii, tmp_Im.nii, 1 ] -t SyN[ 0.15, 0.0, 2.0 ] -c [ 1000x500x400x300, 1e-6, 10 ] -s 6x4x2x0vox -f 8x4x2x1 -w [ 0.05, 1.0 ] -u 1 -z 1 -x [ tmp_If_mask.nii, tmp_Im_mask.nii ] -o [ tmp_, warped_1_0.0fluid_2.0diffusion.nii.gz ]"
     # Demons
     # Using bSplineSyn
     # ants_cmd = f"antsRegistration -d 3 -v 1 -m Demons[ tmp_If.nii, tmp_Im.nii, 1 ] -t BSplineSyN[ 0.2, 26, 0, 3 ] \
@@ -231,8 +238,12 @@ def regAirlab(fixed_image, moving_image, vox_res=[1, 1, 1]):
     fixed_image = normalize(fixed_image, 0, 1)
     moving_image = normalize(moving_image, 0, 1)
     moving_image = match_histograms(moving_image, fixed_image)
-    fixed_image = al.image_from_numpy(fixed_image, vox_res, [0, 0, 0], dtype=dtype, device=device)
-    moving_image = al.image_from_numpy(moving_image, vox_res, [0, 0, 0], dtype=dtype, device=device)
+    fixed_image = al.image_from_numpy(
+        fixed_image, vox_res, [0, 0, 0], dtype=dtype, device=device
+    )
+    moving_image = al.image_from_numpy(
+        moving_image, vox_res, [0, 0, 0], dtype=dtype, device=device
+    )
 
     # create image pyramide size/4, size/2, size/1
     # ds_factors = [8, 4, 2, 1]
@@ -298,12 +309,20 @@ def regAirlab(fixed_image, moving_image, vox_res=[1, 1, 1]):
 
     # create final result
     displacement = transformation.get_displacement()
-    displacement = al.create_displacement_image_from_image(transformation.get_displacement(), fixed_image)
-    displacement = al.transformation.utils.unit_displacement_to_displacement(displacement)
+    displacement = al.create_displacement_image_from_image(
+        transformation.get_displacement(), fixed_image
+    )
+    displacement = al.transformation.utils.unit_displacement_to_displacement(
+        displacement
+    )
 
     inv_displacement = transformation.get_inverse_displacement()
-    inv_displacement = al.create_displacement_image_from_image(transformation.get_inverse_displacement(), moving_image)
-    inv_displacement = al.transformation.utils.unit_displacement_to_displacement(inv_displacement)
+    inv_displacement = al.create_displacement_image_from_image(
+        transformation.get_inverse_displacement(), moving_image
+    )
+    inv_displacement = al.transformation.utils.unit_displacement_to_displacement(
+        inv_displacement
+    )
 
     th.cuda.empty_cache()
     # return np.squeeze(displacement.numpy()), np.squeeze(inv_displacement.numpy())
@@ -401,8 +420,8 @@ def Demons(
             # Is = ndimage.gaussian_filter((Ifm+Imm)/2,sigma=sigma_s,truncate=2.0)
 
             gIx, gIy, gIz = imgrad3d(Is)
-            gI = np.sqrt(np.abs(gIx ** 2 + gIy ** 2 + gIz ** 2) + 1e-6)
-            discriminator = gI ** 2 + np.abs(dI) ** 2
+            gI = np.sqrt(np.abs(gIx**2 + gIy**2 + gIz**2) + 1e-6)
+            discriminator = gI**2 + np.abs(dI) ** 2
             dI = dI * 3.0
             ux = -dI * gIx / discriminator
             uy = -dI * gIy / discriminator
@@ -470,9 +489,9 @@ def interp(I, M_field, device=sp.Device(-1), k_id=1, deblur=True):
     # b spline interpolation
     N = 64
     if k_id == 0:
-        kernel = [(3 * (x / N) ** 3 - 6 * (x / N) ** 2 + 4) / 6 for x in range(0, N)] + [
-            (2 - x / N) ** 3 / 6 for x in range(N, 2 * N)
-        ]
+        kernel = [
+            (3 * (x / N) ** 3 - 6 * (x / N) ** 2 + 4) / 6 for x in range(0, N)
+        ] + [(2 - x / N) ** 3 / 6 for x in range(N, 2 * N)]
         dkernel = np.array([-0.2, 1.4, -0.2])
 
         k_wid = 4
@@ -488,7 +507,9 @@ def interp(I, M_field, device=sp.Device(-1), k_id=1, deblur=True):
 
     # 2d/3d
     if ndim == 3:
-        dkernel = dkernel[:, None, None] * dkernel[None, :, None] * dkernel[None, None, :]
+        dkernel = (
+            dkernel[:, None, None] * dkernel[None, :, None] * dkernel[None, None, :]
+        )
         Nx, Ny, Nz = I.shape
         my, mx, mz = np.meshgrid(np.arange(Ny), np.arange(Nx), np.arange(Nz))
         m = np.stack((mx, my, mz), axis=-1)
@@ -532,7 +553,9 @@ class interp_al_op(Linop):
             dtype = th.float32
             th_device = th.device("cuda:0")
             input_d = sp.to_device(input)
-            input_d = al.image_from_numpy(input_d, self.vox_res, [0, 0, 0], dtype=dtype, device=th_device)
+            input_d = al.image_from_numpy(
+                input_d, self.vox_res, [0, 0, 0], dtype=dtype, device=th_device
+            )
             warped_im = al.transformation.utils.warp_image(input_d, self.M_field)
             return sp.to_device(warped_im.numpy(), device)
 

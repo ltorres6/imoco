@@ -12,7 +12,8 @@ import matplotlib.pyplot as plt
 import nibabel as nib
 import numpy as np
 import sigpy as sp
-import torch as th
+
+# import torch as th
 
 import ute_recon_tools.convert_ute as convert_ute
 from autofov import autofov
@@ -27,6 +28,28 @@ from moco import moco
 from normalize import normalize
 from writeDicoms import writeDicoms
 from xdgrasp import xdgrasp
+from sigpy.mri.dcf import pipe_menon_dcf
+from tqdm import tqdm
+
+log = logging.getLogger(__name__)
+
+
+def plot_losses(loss_file, diagnostics_dir):
+    loss = []
+
+    f = open(loss_file, "r")
+    for row in f:
+        loss.append(float(row))
+
+    plt.plot(loss, color="g", label="File Data")
+
+    plt.xlabel("Iteration", fontsize=12)
+    plt.ylabel("Loss", fontsize=12)
+
+    plt.title("Loss", fontsize=20)
+    plt.legend()
+    plt.savefig(diagnostics_dir + "Loss.png")
+    plt.close()
 
 
 def run(
@@ -63,7 +86,14 @@ def run(
     sigma=0.4,
     tau=0.4,
     device=0,
-    max_coils=8
+    max_coils=8,
+    final_matrix_size=(256, 256, 256),
+    resolution=[1.25, 1.25, 1.25],
+    recalc_dcf=False,
+    pre_whiten=False,
+    clean_by_resp=True,
+    load_registration=False,
+    iterations=20,
 ):
     if postfix is None:
         postfix = ""
@@ -76,7 +106,7 @@ def run(
         # Set to false if using external....
         remove_bulk_motion = False
     compress_coils = True
-    logging.info(f"Resp Flip {flip_resp}")
+    log.info(f"Resp Flip {flip_resp}")
     # flip_resp = True
     # use_detrend = False
 
@@ -88,13 +118,27 @@ def run(
 
     dc_signal = 1
     spokesDSF = 1.0
-    hardgating_weights = [hardgating_weights] if isinstance(hardgating_weights, float) else hardgating_weights
-    softgating_decays = [softgating_decays] if isinstance(softgating_decays, float) else softgating_decays
-    imoco_lambdas = [imoco_lambdas] if isinstance(imoco_lambdas, float) else imoco_lambdas
-    xdgrasp_lambdas = [xdgrasp_lambdas] if isinstance(xdgrasp_lambdas, float) else xdgrasp_lambdas
-    reference_frames = [reference_frames] if isinstance(reference_frames, int) else reference_frames
+    hardgating_weights = (
+        [hardgating_weights]
+        if isinstance(hardgating_weights, float)
+        else hardgating_weights
+    )
+    softgating_decays = (
+        [softgating_decays]
+        if isinstance(softgating_decays, float)
+        else softgating_decays
+    )
+    imoco_lambdas = (
+        [imoco_lambdas] if isinstance(imoco_lambdas, float) else imoco_lambdas
+    )
+    xdgrasp_lambdas = (
+        [xdgrasp_lambdas] if isinstance(xdgrasp_lambdas, float) else xdgrasp_lambdas
+    )
+    reference_frames = (
+        [reference_frames] if isinstance(reference_frames, int) else reference_frames
+    )
 
-    logging.info("Low Res XDGRASP Lambda: {}".format(lowRes_xdgrasp_lambda))
+    log.info("Low Res XDGRASP Lambda: {}".format(lowRes_xdgrasp_lambda))
     tv_device = 0
 
     timei = time.time()
@@ -126,14 +170,15 @@ def run(
 
     fileList = os.listdir(raw_dir)
     if "MRI_Raw.h5" in fileList or "ksp.npy" in fileList:
-        logging.info("File Exists, Begin!")
+        log.info("File Exists, Begin!")
     else:
-        logging.info("File Does Not Exist, Skipping!")
+        log.info("File Does Not Exist, Skipping!")
         return
 
     # Set up data paths
     h5Path = os.path.join(raw_dir, "MRI_Raw.h5")
     mrimgLPath = os.path.join(motionResolvedDir, "MotionResolvedLowRes.npy")
+    mrimgLniiPath = os.path.join(motionResolvedDir, "MotionResolvedLowRes.nii.gz")
     griddedmrPath = os.path.join(motionResolvedDir, "GriddedMotionResolved.nii.gz")
     imgNoGatePath = os.path.join(noGateDir, "noGate.nii.gz")
     imgHardGatePath = os.path.join(hardGateDir, "hardGate.nii.gz")
@@ -144,16 +189,22 @@ def run(
     tr_file = os.path.join(raw_dir, "tr.npy")
     resp_txt_file = os.path.join(diagnostics_dir, "resp.txt")
     dc_txt_file = os.path.join(diagnostics_dir, "dc.txt")
+    noise_file = os.path.join(raw_dir, "noise.npy")
+
     # Create diagnostics directory  if doesn't exist.
     Path(diagnostics_dir).mkdir(parents=True, exist_ok=True)
 
     # 1) Convert MRI_Raw.h5 to cfl and read resp waveform.
     if os.path.isfile(ksp_file) is False or overwrite_raw is True:
-        logging.info("Loading and Saving.....")
-        logging.info("Running File Conversion...")
+        log.info("Loading and Saving.....")
+        log.info("Running File Conversion...")
         # ksp, coord, dcf, resp, tr = convertUTE(h5Path, max_coils, dsfSpokes=spokesDSF)
-        ksp, coord, dcf, resp, tr = convert_ute.convert_ute(
-            h5Path, max_coils=max_coils, dsfSpokes=spokesDSF, compress_coils=compress_coils
+        ksp, coord, dcf, resp, tr, noise = convert_ute.convert_ute(
+            h5Path,
+            max_coils=max_coils,
+            dsfSpokes=spokesDSF,
+            compress_coils=compress_coils,
+            pre_whiten=pre_whiten,
         )
         try:
             os.remove(ksp_file)
@@ -163,6 +214,7 @@ def run(
             os.remove(resp_txt_file)
             os.remove(resp_file)
             os.remove(tr_file)
+            os.remove(noise_file)
         except OSError:
             pass
         np.save(ksp_file, ksp)
@@ -170,8 +222,10 @@ def run(
         np.save(dcf_file, dcf)
         np.save(resp_file, resp)
         np.save(tr_file, tr)
+        np.save(noise_file, noise)
+        del noise
     else:
-        logging.info("Loading Data")
+        log.info("Loading Data")
         ksp = np.load(ksp_file)
         coord = np.load(coord_file)
         dcf = np.load(dcf_file)
@@ -181,6 +235,11 @@ def run(
             "resp doesn't exist, setting dc_flag=1"
             dc_signal = 1
         tr = np.load(tr_file)
+
+    # Use pipe to correct dcf
+    if recalc_dcf:
+        dcf = sp.to_device(pipe_menon_dcf(coord, device=device))
+
     # Scale DCF for improved convergence
     dcf **= 0.5
     ksp /= np.abs(ksp).max()
@@ -196,18 +255,20 @@ def run(
     # )
     affine_t = np.eye(4)
 
-    logging.info("Kspace Shape: {}...".format(ksp.shape))
-    logging.info("trajectory Shape: {}...".format(coord.shape))
-    logging.info("DCF Shape: {}....".format(dcf.shape))
-    logging.info(f"Repetition Time: {tr} seconds")
+    log.info("Kspace Shape: {}...".format(ksp.shape))
+    log.info("trajectory Shape: {}...".format(coord.shape))
+    log.info("DCF Shape: {}....".format(dcf.shape))
+    log.info(f"Repetition Time: {tr} seconds")
 
     if dc_signal == 1:
-        logging.info("Estimating Resp Waveform from DC signal...")
-        logging.info("Using TR: {} seconds".format(tr))
-        [resp, dc] = estimate_resp(ksp[:, :, 0], tr, fl=0.02, fh=0.4, fw=0.01, usePhase=False)
+        log.info("Estimating Resp Waveform from DC signal...")
+        log.info("Using TR: {} seconds".format(tr))
+        [resp, dc] = estimate_resp(
+            ksp[:, :, 0], tr, fl=0.02, fh=0.4, fw=0.01, usePhase=False
+        )
 
         # if subject in ["103-017", "103-033"]:
-        #     logging.info("LOWER THRESH")
+        #     log.info("LOWER THRESH")
         #     [resp, dc] = estimate_resp(ksp[:, :, 0], tr, fl=0.02, fh=0.4, fw=0.01, usePhase=False)
         # else:
         #     [resp, dc] = estimate_resp(ksp[:, :, 0], tr, fl=0.1, fh=1.2, fw=0.01, usePhase=False)
@@ -237,7 +298,8 @@ def run(
         resp *= -1
 
     # Clean data based on k-space signal
-    ksp, coord, dcf, resp = clean_resp(ksp, coord, dcf, resp, diagnostics_dir)
+    if clean_by_resp:
+        ksp, coord, dcf, resp = clean_resp(ksp, coord, dcf, resp, diagnostics_dir)
 
     np.save(resp_file, resp)
     np.savetxt(resp_txt_file, resp)
@@ -263,9 +325,16 @@ def run(
     plt.close()
 
     # 2) AutoFOV to reduce matrix size
-    logging.info("Running AutoFOV...")
+    log.info("Running AutoFOV...")
     coord = autofov(
-        ksp, coord, dcf ** 2, diagnostics_dir, num_ro=fovNReadout, thresh=fovthresh, device=device, radial=False,
+        ksp,
+        coord,
+        dcf**2,
+        diagnostics_dir,
+        num_ro=fovNReadout,
+        thresh=fovthresh,
+        device=device,
+        radial=False,
     )
 
     # 3) noGating Recon
@@ -273,35 +342,64 @@ def run(
         if os.path.isfile(imgNoGatePath) is False or overwrite_recons is True:
             Path(noGateDir).mkdir(parents=True, exist_ok=True)
             dicomDir = os.path.join(noGateDir, f"series_{series_nums[0]}")
-            imgNoGate = gatedRecon(ksp, coord, dcf, resp, gating_type="none", device=device, flip=False)
-            imgNoGate = normalize(sp.resize(np.abs(imgNoGate), (256, 256, 256)), 0, 255)
+            imgNoGate = gatedRecon(
+                ksp, coord, dcf, resp, gating_type="none", device=device, flip=False
+            )
+            imgNoGate = normalize(
+                sp.resize(np.abs(imgNoGate), final_matrix_size), 0, 255
+            )
             imgNoGate = nib.Nifti1Image(imgNoGate, affine_t)
             nib.save(imgNoGate, imgNoGatePath)
-            writeDicoms(imgNoGatePath, dicomDir, UID_base=UID_base, subject_id=subject_id, series_num=series_nums[0])
+            writeDicoms(
+                imgNoGatePath,
+                dicomDir,
+                UID_base=UID_base,
+                subject_id=subject_id,
+                series_num=series_nums[0],
+            )
             del imgNoGate
 
     # 4) hardGating Recon
     if do_HardGating:
         Path(hardGateDir).mkdir(parents=True, exist_ok=True)
         for hardgating_weight in hardgating_weights[::-1]:
-            imgHardGatePath = os.path.join(hardGateDir, f"hardGate{hardgating_weight:.0f}.nii.gz")
+            imgHardGatePath = os.path.join(
+                hardGateDir, f"hardGate{hardgating_weight:.0f}.nii.gz"
+            )
             dicomDir = os.path.join(hardGateDir, f"series_{series_nums[1]}")
             if os.path.isfile(imgHardGatePath) is False or overwrite_recons is True:
                 Path(hardGateDir).mkdir(parents=True, exist_ok=True)
                 imgHardGate = gatedRecon(
-                    ksp, coord, dcf, resp, gating_type="hard", gating_thresh=hardgating_weight, device=device, flip=False,
+                    ksp,
+                    coord,
+                    dcf,
+                    resp,
+                    gating_type="hard",
+                    gating_thresh=hardgating_weight,
+                    device=device,
+                    flip=False,
                 )
-                imgHardGate = normalize(sp.resize(np.abs(imgHardGate), (256, 256, 256)), 0, 255)
+                imgHardGate = normalize(
+                    sp.resize(np.abs(imgHardGate), final_matrix_size), 0, 255
+                )
                 imgHardGate = nib.Nifti1Image(imgHardGate, affine_t)
                 nib.save(imgHardGate, imgHardGatePath)
-                writeDicoms(imgHardGatePath, dicomDir, UID_base=UID_base, subject_id=subject_id, series_num=series_nums[1])
+                writeDicoms(
+                    imgHardGatePath,
+                    dicomDir,
+                    UID_base=UID_base,
+                    subject_id=subject_id,
+                    series_num=series_nums[1],
+                )
                 del imgHardGate
 
     # 5) softGating Recon
     if do_SoftGating:
         Path(softGateDir).mkdir(parents=True, exist_ok=True)
         for softgating_decay in softgating_decays[::-1]:
-            imgSoftGatePath = os.path.join(softGateDir, f"softGate{softgating_decay:.1f}.nii.gz")
+            imgSoftGatePath = os.path.join(
+                softGateDir, f"softGate{softgating_decay:.1f}.nii.gz"
+            )
             dicomDir = os.path.join(softGateDir, f"series_{series_nums[2]}")
             if os.path.isfile(imgSoftGatePath) is False or overwrite_recons is True:
                 try:
@@ -317,7 +415,9 @@ def run(
                         flip=False,
                     )
                 except:
-                    logging.info("GPU memory exceeded or otherwise failed on GPU. Trying CPU.")
+                    log.info(
+                        "GPU memory exceeded or otherwise failed on GPU. Trying CPU."
+                    )
                     imgSoftGate = gatedRecon(
                         ksp,
                         coord,
@@ -329,17 +429,25 @@ def run(
                         device=-1,
                         flip=False,
                     )
-                imgSoftGate = normalize(sp.resize(np.abs(imgSoftGate), (256, 256, 256)), 0, 255)
+                imgSoftGate = normalize(
+                    sp.resize(np.abs(imgSoftGate), final_matrix_size), 0, 255
+                )
                 imgSoftGate = nib.Nifti1Image(imgSoftGate, affine_t)
                 nib.save(imgSoftGate, imgSoftGatePath)
-                writeDicoms(imgSoftGatePath, dicomDir, UID_base=UID_base, subject_id=subject_id, series_num=series_nums[2])
+                writeDicoms(
+                    imgSoftGatePath,
+                    dicomDir,
+                    UID_base=UID_base,
+                    subject_id=subject_id,
+                    series_num=series_nums[2],
+                )
                 del imgSoftGate
 
     # Bin Motion States
     ksp, coord, dcf = bin_periodically(ksp, coord, dcf, resp, n_bins, diagnostics_dir)
 
     # 6) Bin Motion States
-    # logging.info("Running bin_motion_states...")
+    # log.info("Running bin_motion_states...")
     # ksp, coord, dcf = bin_motion_states(
     #     ksp,
     #     coord,
@@ -357,13 +465,13 @@ def run(
 
     if do_gridded_motion_resolved:
         if os.path.isfile(griddedmrPath) is False or overwrite_recons is True:
-            logging.info("Running Gridded Motion Resolved Reconstruction...")
+            log.info("Running Gridded Motion Resolved Reconstruction...")
             Path(motionResolvedDir).mkdir(parents=True, exist_ok=True)
             gmrimg = griddedRecon(ksp, coord, dcf, n_bins, device=0)
             gmrimg = normalize(np.moveaxis(np.abs(gmrimg), 0, -1), 0, 255)
             gmrimg = np.transpose(gmrimg, (2, 1, 0, 3))
             gmrimg = np.flip(gmrimg, (0, 1, 2))
-            gmrimg = sp.resize(gmrimg, (256, 256, 256, n_bins))
+            gmrimg = sp.resize(gmrimg, final_matrix_size + (n_bins,))
             gmrimg = nib.Nifti1Image(gmrimg, affine_t)
             nib.save(gmrimg, griddedmrPath)
             del gmrimg
@@ -371,7 +479,7 @@ def run(
     # 7) Low Res xdgrasp recon
     if do_LowRes:
         if os.path.isfile(mrimgLPath) is False or overwrite_recons is True:
-            logging.info("Running Low Res XDGrasp Reconstruction...")
+            log.info("Running Low Res XDGrasp Reconstruction...")
             Path(motionResolvedDir).mkdir(parents=True, exist_ok=True)
             mrimg = xdgrasp(
                 ksp,
@@ -384,30 +492,36 @@ def run(
                 tv_device=0,
                 sigma=sigma,
                 tau=tau,
+                outer_iter=iterations,
             )
-            # mrimgL = sp.resize(mrimg, (n_bins, 192, 192, 192))
-            # mrimgL = normalize(np.moveaxis(np.abs(mrimgL), 0, -1), 0, 255)
-            # mrimgL = np.transpose(mrimgL, (2, 1, 0, 3))
-            # mrimgL = np.flip(mrimgL, (0, 1, 2))
-            # mrimgL = nib.Nifti1Image(mrimgL, affine_t)
+            mrimg2 = normalize(np.moveaxis(np.abs(mrimg), 0, -1), 0, 255)
+            mrimg2 = np.transpose(mrimg2, (2, 1, 0, 3))
+            mrimg2 = np.flip(mrimg2, (0, 1, 2))
+            mrimg2 = nib.Nifti1Image(mrimg2, affine_t)
+            nib.save(mrimg2, mrimgLniiPath)
             np.save(mrimgLPath, mrimg)
-            del mrimg
+            del mrimg, mrimg2
 
     # 8) iMoCo recon
     if do_iMoCoExp:
         Path(iterativeMocoDir).mkdir(parents=True, exist_ok=True)
         for reference_frame in reference_frames[::-1]:
             for imoco_lambda in imoco_lambdas[::-1]:
-                imgPath = os.path.join(iterativeMocoDir, f"iMoCo{imoco_lambda:.2f}_frame{reference_frame}.nii.gz",)
+                imgPath = os.path.join(
+                    iterativeMocoDir,
+                    f"iMoCo{imoco_lambda:.2f}_frame{reference_frame}.nii.gz",
+                )
                 dicomDir = os.path.join(iterativeMocoDir, f"series_{series_nums[3]}")
                 if os.path.isfile(imgPath) is False or overwrite_recons is True:
-                    logging.info("Running iMoCo Reconstruction...")
-                    logging.info(f"Using Reference Frame {reference_frame}")
+                    log.info("Running iMoCo Reconstruction...")
+                    log.info(f"Using Reference Frame {reference_frame}")
                     try:
                         mrimg = np.load(mrimgLPath)
                     except Exception:
-                        logging.error("Could not read low res xd-grasp reconstruction")
+                        log.error("Could not read low res xd-grasp reconstruction")
                     register_imoco = 1
+                    if load_registration:
+                        register_imoco = 0
                     img = imoco(
                         ksp,
                         coord,
@@ -418,18 +532,25 @@ def run(
                         mr_scale=0.75,
                         lambda_tv=imoco_lambda,
                         inner_iter=10,
-                        outer_iter=20,
+                        outer_iter=iterations,
                         device=device,
                         nRef=reference_frame,
                         reg_flag=register_imoco,
                         diffusion_reg=0.0,
-                        sigma=sigma,
-                        tau=tau,
+                        sigma=sigma * 0.8,
+                        tau=tau * 0.8,
+                        resolution=resolution,
                     )
-                    img = normalize(sp.resize(np.abs(img), (256, 256, 256)), 0, 255)
+                    img = normalize(sp.resize(np.abs(img), final_matrix_size), 0, 255)
                     img = nib.Nifti1Image(img, np.eye(4))
                     nib.save(img, imgPath)
-                    writeDicoms(imgPath, dicomDir, UID_base=UID_base, subject_id=subject_id, series_num=series_nums[3])
+                    writeDicoms(
+                        imgPath,
+                        dicomDir,
+                        UID_base=UID_base,
+                        subject_id=subject_id,
+                        series_num=series_nums[3],
+                    )
                     del img, mrimg
                     # th.cuda.empty_cache()
 
@@ -437,12 +558,16 @@ def run(
     if do_HighRes:
         Path(motionResolvedDir).mkdir(parents=True, exist_ok=True)
         for xdgrasp_lambda in xdgrasp_lambdas[::-1]:
-            mrimgPath = os.path.join(motionResolvedDir, f"MotionResolved{xdgrasp_lambda:.3f}.nii.gz")
-            mrimg_expPath = os.path.join(motionResolvedDir, f"MotionResolved_exp{xdgrasp_lambda:.3f}.nii.gz")
+            mrimgPath = os.path.join(
+                motionResolvedDir, f"MotionResolved{xdgrasp_lambda:.3f}.nii.gz"
+            )
+            mrimg_expPath = os.path.join(
+                motionResolvedDir, f"MotionResolved_exp{xdgrasp_lambda:.3f}.nii.gz"
+            )
             dicomDir = os.path.join(motionResolvedDir, f"series_{series_nums[4]}")
             # print(mrimgPath)
             if os.path.isfile(mrimgPath) is False or overwrite_recons is True:
-                logging.info("Running Full Res XDGrasp Reconstruction...")
+                log.info("Running Full Res XDGrasp Reconstruction...")
                 mrimg = xdgrasp(
                     ksp,
                     coord,
@@ -454,16 +579,23 @@ def run(
                     tv_device=tv_device,
                     sigma=sigma,
                     tau=tau,
+                    outer_iter=iterations,
                 )
                 mrimg = normalize(np.moveaxis(np.abs(mrimg), 0, -1), 0, 255)
                 mrimg = np.transpose(mrimg, (2, 1, 0, 3))
                 mrimg = np.flip(mrimg, (0, 1, 2))
-                mrimg = sp.resize(mrimg, (256, 256, 256, n_bins))
+                mrimg = sp.resize(mrimg, final_matrix_size + (n_bins,))
                 mrimg = nib.Nifti1Image(mrimg, affine_t)
                 mrimg_exp = nib.Nifti1Image(mrimg.get_fdata()[..., 0], affine_t)
                 nib.save(mrimg, mrimgPath)
                 nib.save(mrimg_exp, mrimg_expPath)
-                writeDicoms(mrimg_expPath, dicomDir, UID_base=UID_base, subject_id=subject_id, series_num=series_nums[4])
+                writeDicoms(
+                    mrimg_expPath,
+                    dicomDir,
+                    UID_base=UID_base,
+                    subject_id=subject_id,
+                    series_num=series_nums[4],
+                )
                 del mrimg, mrimg_exp
                 cp._default_memory_pool.free_all_blocks()
 
@@ -473,29 +605,40 @@ def run(
     if do_MoCoExp:
         Path(mocoDir).mkdir(parents=True, exist_ok=True)
         for xdgrasp_lambda in xdgrasp_lambdas[::-1]:
-            mrimgPath = os.path.join(motionResolvedDir, f"MotionResolved{xdgrasp_lambda:.3f}.nii.gz")
+            mrimgPath = os.path.join(
+                motionResolvedDir, f"MotionResolved{xdgrasp_lambda:.3f}.nii.gz"
+            )
             dicomDir = os.path.join(motionResolvedDir, f"series_{series_nums[5]}")
             for reference_frame in reference_frames[::-1]:
-                imgPath = os.path.join(mocoDir, f"MoCo{xdgrasp_lambda:.3f}_frame{reference_frame}.nii.gz")
+                imgPath = os.path.join(
+                    mocoDir, f"MoCo{xdgrasp_lambda:.3f}_frame{reference_frame}.nii.gz"
+                )
                 if os.path.isfile(imgPath) is False or overwrite_recons is True:
-                    logging.info(f"Running MoCo Registrations")
-                    logging.info(f"Using Reference Frame {reference_frame}")
+                    log.info(f"Running MoCo Registrations")
+                    log.info(f"Using Reference Frame {reference_frame}")
                     imgMoco = moco(
                         mrimgPath,
                         mf_dir=f"{motionResolvedDir}/diagnostics/",
                         nRef=reference_frame,
                         reg_flag=1,
                         res_scale=1.0,
+                        resolution=resolution,
                     )
                     imgMoco = nib.Nifti1Image(normalize(imgMoco, 0, 255), affine_t)
                     nib.save(imgMoco, imgPath)
-                    writeDicoms(imgPath, dicomDir, UID_base=UID_base, subject_id=subject_id, series_num=series_nums[5])
+                    writeDicoms(
+                        imgPath,
+                        dicomDir,
+                        UID_base=UID_base,
+                        subject_id=subject_id,
+                        series_num=series_nums[5],
+                    )
                     del imgMoco
-                    th.cuda.empty_cache()
+                    # th.cuda.empty_cache()
 
     timeF = (time.time() - timei) / 60
-    logging.info("Finshed Recon in {} minutes".format(timeF))
-    th.cuda.empty_cache()
+    log.info("Finshed Recon in {} minutes".format(timeF))
+    # th.cuda.empty_cache()
 
 
 if __name__ == "__main__":
@@ -503,19 +646,49 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="multi recons")
     parser.add_argument("raw_dir", type=str, help="raw data directory")
     parser.add_argument("out_dir", type=str, help="desired output directory")
-    parser.add_argument("--postfix", type=str, default="", help="add a string to directories. Useful for different runs")
-    parser.add_argument("--softgating_decay", type=float, default=1.5, help="Softgating exponential decay constant")
-    parser.add_argument("--imoco_lambda", type=float, default=0.05, help="iMoCo TGV regularization parameter")
-    parser.add_argument("--xdgrasp_lambda", type=float, default=0.025, help="XD-GRASP TV regularization parameter")
-    parser.add_argument("--reference_frames", type=int, nargs="+", default=-1, help="Registration Reference Frame")
+    parser.add_argument(
+        "--postfix",
+        type=str,
+        default="",
+        help="add a string to directories. Useful for different runs",
+    )
+    parser.add_argument(
+        "--softgating_decay",
+        type=float,
+        default=1.5,
+        help="Softgating exponential decay constant",
+    )
+    parser.add_argument(
+        "--imoco_lambda",
+        type=float,
+        default=0.05,
+        help="iMoCo TGV regularization parameter",
+    )
+    parser.add_argument(
+        "--xdgrasp_lambda",
+        type=float,
+        default=0.025,
+        help="XD-GRASP TV regularization parameter",
+    )
+    parser.add_argument(
+        "--reference_frames",
+        type=int,
+        nargs="+",
+        default=-1,
+        help="Registration Reference Frame",
+    )
     args = parser.parse_args()
-    Path(args.out_dir + f"/diagnostics{args.postfix}/").mkdir(parents=True, exist_ok=True)
+    Path(args.out_dir + f"/diagnostics{args.postfix}/").mkdir(
+        parents=True, exist_ok=True
+    )
     logging.basicConfig(
         format="%(asctime)s,%(msecs)d %(name)s %(levelname)s %(message)s",
         datefmt="%H:%M:%S",
         level=logging.INFO,
         handlers=[
-            logging.FileHandler(args.out_dir + f"/diagnostics{args.postfix}/recon_log.txt", mode="a"),
+            logging.FileHandler(
+                args.out_dir + f"/diagnostics{args.postfix}/recon_log.txt", mode="a"
+            ),
             logging.StreamHandler(sys.stdout),
         ],
     )
