@@ -5,18 +5,24 @@
 
 **Iterative Motion Compensation (iMoCo)** for pulmonary UTE MRI reconstruction.
 
-This repository implements a suite of retrospective motion compensation techniques for free-breathing 3D ultra-short echo time (UTE) MRI, as described in:
-
-> Torres LA, et al. "Comparison of Retrospective Motion Compensation Techniques for Pulmonary Dynamic UTE MRI in Idiopathic Pulmonary Fibrosis." *Journal of Magnetic Resonance Imaging (JMRI)*.
+This repository implements a suite of retrospective motion compensation techniques for free-breathing 3D ultra-short echo time (UTE) MRI.
 
 ## Citation
 
+If you use this software, please cite the associated manuscript (details forthcoming):
+
+> [Author(s) TBD]. "[Title TBD]." *[Journal TBD]*, forthcoming.
+
+<!--
+Update the citation block and BibTeX entry below once the manuscript is published.
+-->
+
 ```bibtex
-@article{torres2024imoco,
-  title={Comparison of Retrospective Motion Compensation Techniques for Pulmonary Dynamic UTE MRI in Idiopathic Pulmonary Fibrosis},
-  author={Torres, Luis A and others},
-  journal={Journal of Magnetic Resonance Imaging},
-  year={2024}
+@article{imoco,
+  title={TBD},
+  author={TBD},
+  journal={TBD},
+  year={TBD}
 }
 ```
 
@@ -42,7 +48,7 @@ Additionally, the following experimental methods (not described in the paper) ar
 
 - Python 3.9--3.11
 - [uv](https://docs.astral.sh/uv/) package manager
-- [ANTs](https://github.com/ANTsX/ANTs) (required for iMoCo and MoCo registration)
+- [ANTs](https://github.com/ANTsX/ANTs) built from source (required for iMoCo and MoCo registration; ANTsPy is **not** supported)
 
 ### Install the package
 
@@ -50,30 +56,18 @@ Additionally, the following experimental methods (not described in the paper) ar
 uv sync
 ```
 
-### Install ANTs
+### Install ANTs (built from source)
 
-The default iMoCo and MoCo pipelines call `antsRegistration` from the command line, so it must be on your `PATH`. The AirLab-based variants (`imoco_airlab`, `moco_airlab`) do not require ANTs.
+The default iMoCo and MoCo pipelines shell out to the `antsRegistration` compiled binary via `os.system`. This requires ANTs to be **built from source** -- the ANTsPy Python package will *not* work. The AirLab-based variants (`imoco_airlab`, `moco_airlab`) do not require ANTs.
 
-**Option A -- conda-forge (easiest):**
-
-```bash
-conda install -c conda-forge ants
-```
-
-**Option B -- pre-built binaries:**
-
-Download a release from [ANTsX/ANTs releases](https://github.com/ANTsX/ANTs/releases), extract it, and add the `bin/` directory to your `PATH`:
+Follow the [ANTs build instructions](https://github.com/ANTsX/ANTs/wiki/Compiling-ANTs-on-Linux-and-Mac-OS), then add the `bin/` directory to your `PATH`:
 
 ```bash
 export ANTSPATH=/path/to/ants/bin
 export PATH=$ANTSPATH:$PATH
 ```
 
-**Option C -- build from source:**
-
-Follow the [ANTs build instructions](https://github.com/ANTsX/ANTs/wiki/Compiling-ANTs-on-Linux-and-Mac-OS).
-
-**Verify** that ANTs is installed:
+**Verify** the binary is available:
 
 ```bash
 antsRegistration --version
