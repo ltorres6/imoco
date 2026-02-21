@@ -1,5 +1,24 @@
+# Data files
 *.nii
 *.nii.gz
 *.npy
-*.vscode
-__pycache__
+*.pdf
+
+# Environment
+.env
+
+# OS
+.DS_Store
+
+# Python
+*.pyc
+__pycache__/
+*.egg-info/
+dist/
+build/
+
+# IDE
+.vscode/
+
+# Sensitive
+sendText.py

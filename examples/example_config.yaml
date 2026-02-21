@@ -1,0 +1,58 @@
+# iMoCo Pipeline Configuration
+# =============================
+# This YAML file configures the full reconstruction pipeline.
+# All parameters have sensible defaults; only raw_dir and out_dir are required.
+
+# --- Paths ---
+raw_dir: /path/to/raw/data
+out_dir: /path/to/output
+
+# --- Pipeline flags ---
+# Enable/disable individual reconstruction methods
+do_noGating: true
+do_HardGating: true
+do_SoftGating: true
+do_LowRes: true
+do_HighRes: true
+do_iMoCoExp: true
+do_MoCoExp: false
+do_gridded_motion_resolved: true
+
+# --- Overwrite flags ---
+overwrite_raw: true
+overwrite_recons: false
+
+# --- Reconstruction parameters ---
+n_bins: 6
+max_coils: 8
+device: 0                         # GPU device index (-1 for CPU)
+iterations: 20
+final_matrix_size: [256, 256, 256]
+resolution: [1.25, 1.25, 1.25]   # Voxel resolution in mm
+
+# --- Algorithm parameters ---
+hardgating_weights: [50]          # Percentile thresholds for hard gating
+softgating_decays: [2.0]         # Exponential decay constants for soft gating
+imoco_lambdas: [0.05]            # TGV regularization for iMoCo
+xdgrasp_lambdas: [0.02]         # TV regularization for XD-GRASP
+lowRes_xdgrasp_lambda: 0.0075   # TV regularization for low-res XD-GRASP
+sigma: 0.4                       # Primal-dual step size (primal)
+tau: 0.4                         # Primal-dual step size (dual)
+reference_frames: [-1]           # Reference frame for registration (-1 = last)
+
+# --- Data preprocessing ---
+flip_resp: false                  # Invert respiratory signal polarity
+recalc_dcf: false                # Recompute density compensation
+pre_whiten: false                # Apply noise pre-whitening
+clean_by_resp: true              # Remove abnormal breathing cycles
+load_registration: false         # Load pre-computed registration fields
+
+# --- AutoFOV parameters ---
+fovNReadout: 75                  # Number of readout points for FOV estimation
+fovthresh: 0.03                  # Threshold for FOV mask
+
+# --- Optional metadata ---
+prefix: ""
+postfix: ""
+subject_id: null                 # Subject ID for DICOM tags
+UID_base: null                   # Base UID for DICOM series (auto-generated if null)

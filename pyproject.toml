@@ -1,23 +1,30 @@
 [tool.poetry]
 name = "imoco"
 version = "0.1.0"
-description = "imoco reconstructions"
+description = "Iterative Motion Compensation (iMoCo) for pulmonary UTE MRI reconstruction"
 authors = ["Luis Torres <luigibytes@gmail.com>"]
 readme = "README.md"
+license = "BSD-3-Clause"
+packages = [{include = "imoco"}]
 
 [tool.poetry.dependencies]
-python = "3.9"
-numpy = "^1.23.4"
-requests = "^2.28.1"
-matplotlib = "^3.6.1"
-nibabel = "^4.0.2"
-h5py = "^3.7.0"
-sigpy = "^0.1.23"
-scikit-image = "^0.19.3"
-pandas = "^1.5.0"
-torch = "^1.12.1"
-simpleitk = "^2.2.0"
+python = ">=3.9,<3.12"
+numpy = ">=1.23"
+matplotlib = ">=3.6"
+nibabel = ">=4.0"
+h5py = ">=3.7"
+sigpy = ">=0.1.23"
+scikit-image = ">=0.19"
+pandas = ">=1.5"
+torch = ">=1.12"
+simpleitk = ">=2.2"
+scipy = ">=1.9"
+Pillow = ">=9.0"
+tqdm = ">=4.0"
+pyyaml = ">=6.0"
 
+[tool.poetry.scripts]
+imoco = "imoco.pipeline:main"
 
 [build-system]
 requires = ["poetry-core"]

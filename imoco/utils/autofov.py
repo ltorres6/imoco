@@ -1,38 +1,40 @@
-import argparse
+import logging
+import os
+
 import numpy as np
 import sigpy as sp
+from PIL import Image
 from scipy import ndimage
 from skimage import measure, transform
-import logging
-from normalize import normalize
-import os
-from PIL import Image
+
+from imoco.utils.normalize import normalize
 
 
 def getLargestCC(mask):
     labels = measure.label(mask)
-    assert labels.max() != 0  # assume at least 1 CC
+    assert labels.max() != 0
     largestCC = labels == np.argmax(np.bincount(labels.flat)[1:]) + 1
     return largestCC
 
 
 def autofov(ksp, coord, dcf, diagnostics_dir, num_ro=100, device=-1, thresh=0.4, radial=False):
-    """Automatic estimation of FOV.
+    """Automatic estimation of field-of-view (FOV).
 
     FOV is estimated by thresholding a low resolution gridded image.
     coord will be modified in-place.
 
     Args:
-        ksp (array): k-space measurements of shape (C, num_tr, num_ro, D).
-            where C is the number of channels,
-            num_tr is the number of TRs, num_ro is the readout points,
-            and D is the number of spatial dimensions.
-        coord (array): k-space coordinates of shape (num_tr, num_ro, D).
-        dcf (array): density compensation factor of shape (num_tr, num_ro).
-        num_ro (int): number of read-out points.
-        device (Device): computing device.
-        thresh (float): threshold between 0 and 1.
+        ksp (ndarray): K-space measurements of shape (C, num_tr, num_ro).
+        coord (ndarray): K-space coordinates of shape (num_tr, num_ro, D).
+        dcf (ndarray): Density compensation factor of shape (num_tr, num_ro).
+        diagnostics_dir (str): Directory to save diagnostic images.
+        num_ro (int): Number of readout points for low-res estimation.
+        device (int): Computing device (-1 for CPU, >=0 for GPU).
+        thresh (float): Threshold between 0 and 1 for FOV mask.
+        radial (bool): Whether data is radially sampled from center.
 
+    Returns:
+        ndarray: Modified coordinates scaled to the estimated FOV.
     """
     device = sp.Device(device)
     xp = device.xp
@@ -47,7 +49,6 @@ def autofov(ksp, coord, dcf, diagnostics_dir, num_ro=100, device=-1, thresh=0.4,
         kspc = ksp[:, :, ro_range]
         coordc = coord[:, ro_range, :]
         dcfc = dcf[:, ro_range]
-        # Multiply by two so we can encompass entire FOV.
         coordc2 = sp.to_device(coordc * 2, device)
         num_coils = len(kspc)
         imgc_shape = np.array(sp.estimate_shape(coordc))
@@ -57,58 +58,49 @@ def autofov(ksp, coord, dcf, diagnostics_dir, num_ro=100, device=-1, thresh=0.4,
         imgc2 = sp.nufft_adjoint(sp.to_device(dcfc * kspc, device), coordc2, [num_coils] + imgc2_shape)
         imgc2 = xp.sum(xp.abs(imgc2) ** 2, axis=0) ** 0.5
         imgc2 = sp.to_device(imgc2)
-        # Filter image?-----------------------
-        # filt = sp.to_device(sp.hanning((16, 16, 16)), device)
-        # filt = sp.resize(filt, imgc2.shape)
-        # imgc2 = sp.convolve(imgc2, filt)
-        # imgc2 = sp.ifft(sp.fft(sp.to_device(imgc2, device), norm=None) * filt, norm=None)
         imgc2 = ndimage.median_filter(imgc2, (3, 3, 3))
-        # -----------------------------------
         imgc2 /= imgc2.max()
-        # plt.ImagePlot(imgc2)
+
         imc = normalize(imgc2[:, imgc2.shape[1] // 2, :], 0, 255)
         imc = Image.fromarray(transform.resize(imc, (256, 256)))
         imc = imc.convert("L")
-        imc.save(diagnostics_dir + "autofov_lowResCoronal.jpg")
+        imc.save(os.path.join(diagnostics_dir, "autofov_lowResCoronal.jpg"))
 
         ims = normalize(imgc2[:, :, imgc2.shape[2] // 2], 0, 255)
         ims = Image.fromarray(transform.resize(ims, (256, 256)))
         ims = ims.convert("L")
-        ims.save(diagnostics_dir + "autofov_lowResSaggital.jpg")
+        ims.save(os.path.join(diagnostics_dir, "autofov_lowResSaggital.jpg"))
 
         ima = normalize(imgc2[imgc2.shape[0] // 2, :, :], 0, 255)
         ima = Image.fromarray(transform.resize(ima, (256, 256)))
         ima = ima.convert("L")
-        ima.save(diagnostics_dir + "autofov_lowResAxial.jpg")
+        ima.save(os.path.join(diagnostics_dir, "autofov_lowResAxial.jpg"))
 
-        # if imgc2.ndim == 3:
-        #     imgc2_cor = imgc2[:, imgc2.shape[1] // 2, :]
-        #     thresh *= imgc2_cor.max()
-        # else:
         thresh *= imgc2.max()
         boxc = imgc2 > thresh
         boxc = getLargestCC(boxc).astype(float)
         imc = normalize(boxc[:, boxc.shape[1] // 2, :], 0, 255)
         imc = Image.fromarray(transform.resize(imc, (256, 256)))
         imc = imc.convert("1")
-        imc.save(diagnostics_dir + "autofov_maskCoronal.jpg")
+        imc.save(os.path.join(diagnostics_dir, "autofov_maskCoronal.jpg"))
 
         ims = normalize(boxc[:, :, boxc.shape[2] // 2], 0, 255)
         ims = Image.fromarray(transform.resize(ims, (256, 256)))
         ims = ims.convert("1")
-        ims.save(diagnostics_dir + "autofov_maskSaggital.jpg")
+        ims.save(os.path.join(diagnostics_dir, "autofov_maskSaggital.jpg"))
 
         ima = normalize(boxc[boxc.shape[0] // 2, :, :], 0, 255)
         ima = Image.fromarray(transform.resize(ima, (256, 256)))
         ima = ima.convert("1")
-        ima.save(diagnostics_dir + "autofov_maskAxial.jpg")
+        ima.save(os.path.join(diagnostics_dir, "autofov_maskAxial.jpg"))
+
         boxc_idx = np.nonzero(boxc)
         boxc_shape = np.array([int(np.abs(boxc_idx[i] - imgc2_center[i]).max()) * 2 for i in range(imgc2.ndim)])
         img_scale = boxc_shape / imgc_shape
         if radial:
             img_scale *= 2
         coord *= img_scale
-        # --------------------
+
         coordc = coord[:, ro_range, :]
         coordc = sp.to_device(coordc, device)
         num_coils = len(kspc)
@@ -116,69 +108,25 @@ def autofov(ksp, coord, dcf, diagnostics_dir, num_ro=100, device=-1, thresh=0.4,
         logging.info("Adjoint Nufft 2")
         imgc = sp.nufft_adjoint(sp.to_device(dcfc * kspc, device), coordc, [num_coils] + imgc_shape)
         imgc = xp.sum(xp.abs(imgc) ** 2, axis=0) ** 0.5
-        # plt.ImagePlot(imgc)
         imgc = sp.to_device(xp.abs(imgc))
+
         imc = normalize(imgc[:, imgc.shape[1] // 2, :], 0, 255)
         imc = Image.fromarray(transform.resize(imc, (256, 256)))
         imc = imc.convert("L")
-        imc.save(diagnostics_dir + "autofov_croppedCoronal.jpg")
+        imc.save(os.path.join(diagnostics_dir, "autofov_croppedCoronal.jpg"))
 
         ims = normalize(imgc[:, :, imgc.shape[2] // 2], 0, 255)
         ims = Image.fromarray(transform.resize(ims, (256, 256)))
         ims = ims.convert("L")
-        ims.save(diagnostics_dir + "autofov_croppedSaggital.jpg")
+        ims.save(os.path.join(diagnostics_dir, "autofov_croppedSaggital.jpg"))
 
         ima = normalize(imgc[imgc.shape[0] // 2, :, :], 0, 255)
         ima = Image.fromarray(transform.resize(ima, (256, 256)))
         ima = ima.convert("L")
-        ima.save(diagnostics_dir + "autofov_croppedAxial.jpg")
+        ima.save(os.path.join(diagnostics_dir, "autofov_croppedAxial.jpg"))
 
         logging.info("AutoFov Output Shape: {}".format(sp.estimate_shape(coord)))
         logging.info("Scaling Factors: {}".format(img_scale))
-        np.savetxt(diagnostics_dir + "fovScaleFactors.txt", img_scale)
+        np.savetxt(os.path.join(diagnostics_dir, "fovScaleFactors.txt"), img_scale)
 
-        # --------------------
         return coord
-
-
-if __name__ == "__main__":
-
-    logging.basicConfig(level=logging.INFO)
-
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--num_ro", type=int, default=100)
-    parser.add_argument("--device", type=int, default=0)
-    parser.add_argument("--thresh", type=float, default=0.1)
-
-    parser.add_argument("ksp_file", type=str)
-    parser.add_argument("coord_file", type=str)
-    parser.add_argument("dcf_file", type=str)
-    parser.add_argument("diagnosticsDir", type=str)
-
-    parser.add_argument("--radial", action="store_true")
-
-    args = parser.parse_args()
-
-    ksp = np.load(args.ksp_file)
-    coord = np.load(args.coord_file)
-    dcf = np.load(args.dcf_file)
-    print("Kspace Shape Original: {}".format(ksp.shape))
-    print("Input Image Shape: {}".format(sp.estimate_shape(coord)))
-
-    coordOut = autofov(
-        ksp,
-        coord,
-        dcf,
-        diagnostics_dir=args.diagnosticsDir,
-        num_ro=args.num_ro,
-        device=args.device,
-        thresh=args.thresh,
-        radial=args.radial,
-    )
-
-    logging.info("Output Image shape: {}".format(sp.estimate_shape(coordOut)))
-
-    logging.info("Saving data.")
-    if os.path.isfile(args.coord_file):
-        os.remove(args.coord_file)
-    np.save(args.coord_file, coordOut)

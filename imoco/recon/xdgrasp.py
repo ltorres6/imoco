@@ -1,40 +1,36 @@
-import argparse
-import sigpy as sp
-import numpy as np
-import sigpy.mri as mr
-from imoco_e import cfl, ext
-from imoco_e.linop_e import NFTs
-from tqdm import trange
-import time
+import copy
 import logging
 import os
+import time
 from pathlib import Path
-import copy
+
 import matplotlib.pyplot as plt
+import numpy as np
+import sigpy as sp
+import sigpy.mri as mr
+from tqdm import trange
+
+from imoco.utils.linops import DLD, NFTs, TVt_prox
 
 
-def plot_losses(loss_file, diagnostics_dir, name):
+def _plot_losses(loss_file, diagnostics_dir, name):
     loss = []
-
-    f = open(loss_file, "r")
-    for row in f:
-        loss.append(float(row))
-
+    with open(loss_file, "r") as f:
+        for row in f:
+            loss.append(float(row))
     plt.plot(loss, color="g", label="File Data")
-
     plt.xlabel("Iteration", fontsize=12)
     plt.ylabel("Loss", fontsize=12)
-
     plt.title("Loss", fontsize=20)
     plt.legend()
-    plt.savefig(diagnostics_dir + f"{name}.png")
+    plt.savefig(os.path.join(diagnostics_dir, f"{name}.png"))
     plt.close()
 
 
-def save_slice(img, save_dir):
+def _save_slice(img, save_dir):
     img_save = np.squeeze(np.abs(sp.to_device(img[:, img.shape[1] // 2, :])))
     imgShapeString = "_".join(map(str, img_save.shape[::-1])) + "Shape.dat"
-    with open(save_dir + "iter_slices" + imgShapeString, "ab") as f:
+    with open(os.path.join(save_dir, "iter_slices" + imgShapeString), "ab") as f:
         f.write(img_save.tobytes())
     del img_save
 
@@ -53,25 +49,43 @@ def xdgrasp(
     sigma=0.4,
     tau=0.4,
 ):
+    """XD-GRASP reconstruction (eXtra-Dimensional Golden-angle RAdial Sparse Parallel MRI).
+
+    Performs motion-resolved compressed sensing reconstruction with temporal
+    total variation regularization.
+
+    Reference: Section II-F of the JMRI paper.
+
+    Args:
+        ksp_in (list): Binned k-space data, list of length n_bins.
+        coord_in (list): Binned coordinates, list of length n_bins.
+        dcf_in (list): Binned density compensation, list of length n_bins.
+        diagnostics_base_path (str): Base path for diagnostics directory.
+        res_scale (float): Resolution scale factor (0-1).
+        lambda_tv (float): Temporal total variation regularization weight.
+        inner_iter (int): Number of inner iterations (unused, kept for API compat).
+        outer_iter (int): Number of outer iterations.
+        device (int): Computing device (-1 for CPU, >=0 for GPU).
+        tv_device (int): Device for TV proximal operator.
+        sigma (float): Primal-dual step size (primal).
+        tau (float): Primal-dual step size (dual).
+
+    Returns:
+        ndarray: Motion-resolved images of shape (n_bins, Nx, Ny, Nz).
+    """
     timeStart = time.time()
     sp.Device(device).use()
     if device >= 0:
         logging.debug("Using GPU...")
     else:
         logging.debug("Using CPU...")
-    save_iter_slice = True
 
-    # Copy input data
     ksp = copy.deepcopy(ksp_in)
     coord = copy.deepcopy(coord_in)
     dcf = copy.deepcopy(dcf_in)
 
-    # As lists, list has len of n_bins
-    # (n_bins, n_coils, n_projections, n_readouts)
     logging.debug("Kspace Shape: {}...".format(ksp[0].shape))
-    # (n_bins, n_projections, n_readouts, n_dim)
     logging.debug("trajectory Shape: {}...".format(coord[0].shape))
-    # (n_bins, n_projections, n_readouts)
     logging.debug("DCF Shape: {}....".format(dcf[0].shape))
 
     nf_arr = np.sqrt(np.sum(coord[0][0, :, :] ** 2, axis=1))
@@ -86,13 +100,10 @@ def xdgrasp(
     nPhases = len(ksp)
     nCoils, nSpokes, nReadouts = ksp[0].shape
 
-    # Make a dedicated diagnostics directory
-    diagnostics_dir = "{}/diagnostics/".format(Path(diagnostics_base_path))
+    diagnostics_dir = os.path.join(str(Path(diagnostics_base_path)), "diagnostics")
     Path(diagnostics_dir).mkdir(parents=True, exist_ok=True)
 
-    # calibration
     logging.info("Running Jsense calibration...")
-    # Map for each Motion Phase?
     mps = mr.app.JsenseRecon(
         ksp[0],
         coord=coord[0],
@@ -118,11 +129,7 @@ def xdgrasp(
     for ii in range(nPhases):
         FTs = NFTs((nCoils,) + tshape, coord[ii], device=sp.Device(device))
         W = sp.linop.Multiply(
-            (
-                nCoils,
-                dcf[ii].shape[0],
-                nReadouts,
-            ),
+            (nCoils, dcf[ii].shape[0], nReadouts),
             dcf[ii],
         )
         FTSs = W * FTs * S
@@ -133,14 +140,11 @@ def xdgrasp(
     L = 0
     for p in range(nPhases):
         L += np.sum(np.abs(PFTSs[p].H * PFTSs[p] * np.complex64(np.ones(tshape))))
-        # L = np.mean(np.abs(L))
     L = L / (np.prod(tshape) * nPhases)
     timeF = time.time()
     logging.debug("Preconditioner Value: {}".format(L))
     logging.debug("Time for preconditioner: {} seconds.".format(timeF - timeI))
 
-    # reconstruction
-    # Apply density compensation
     for p in range(nPhases):
         for c in range(nCoils):
             ksp[p][c] = ksp[p][c] * dcf[p]
@@ -154,13 +158,11 @@ def xdgrasp(
     for ii in pbarOuter:
         timeI = time.time()
         pbarOuter.set_description(f"XD-Grasp Iter {ii}")
-        # Save a slice for diagnostics
-        if save_iter_slice:
-            save_slice(img[0], diagnostics_dir)
+        _save_slice(img[0], diagnostics_dir)
         for p in range(nPhases):
             Y[p] = (Y[p] + sigma * (1 / L * PFTSs[p] * img[p] - ksp[p])) / (1 + sigma)
             img[p] = img[p] - tau * PFTSs[p].H * Y[p]
-        img = np.complex64(ext.TVt_prox(img, lambda_tv))
+        img = np.complex64(TVt_prox(img, lambda_tv))
         timeF = time.time()
         pbarOuter.set_postfix(
             loss=np.linalg.norm(img - img_0) / np.linalg.norm(img), time=timeF - timeI
@@ -170,63 +172,9 @@ def xdgrasp(
 
     timeFinish = time.time()
     cost_loss = np.array(cost_loss)
-    np.savetxt(
-        os.path.join(
-            diagnostics_dir,
-            "xdgrasp_loss_lambda" + str(lambda_tv) + "_res" + str(res_scale) + ".txt",
-        ),
-        cost_loss,
-    )
-    plot_losses(
-        os.path.join(
-            diagnostics_dir,
-            "xdgrasp_loss_lambda" + str(lambda_tv) + "_res" + str(res_scale) + ".txt",
-        ),
-        diagnostics_dir,
-        "xdgrasp_loss_lambda" + str(lambda_tv) + "_res" + str(res_scale),
-    )
+    loss_name = f"xdgrasp_loss_lambda{lambda_tv}_res{res_scale}"
+    np.savetxt(os.path.join(diagnostics_dir, loss_name + ".txt"), cost_loss)
+    _plot_losses(os.path.join(diagnostics_dir, loss_name + ".txt"), diagnostics_dir, loss_name)
     logging.info(f"XDGrasp Recon Finished in: {(timeFinish - timeStart) / 60} min...")
     img = sp.to_device(img)
     return img
-
-
-if __name__ == "__main__":
-    # IO parameters
-    parser = argparse.ArgumentParser(description="XD-GRASP recon.")
-    parser.add_argument("ksp_file", type=str, help="k-space file.")
-    parser.add_argument("coord_file", type=str, help="trajectory file.")
-    parser.add_argument("dcf_file", type=str, help="dcf file.")
-    parser.add_argument("img_file", type=str, help="img out file.")
-    parser.add_argument(
-        "--res_scale", type=float, default=1.0, help="scale of resolution 0-1"
-    )
-    parser.add_argument(
-        "--lambda_tv", type=float, default=2e-2, help="TV regularization, 0.05"
-    )
-    parser.add_argument(
-        "--inner_iter", type=int, default=10, help="Num of inner Iterations."
-    )
-    parser.add_argument(
-        "--outer_iter", type=int, default=20, help="Num of outer Iterations."
-    )
-    parser.add_argument("--device", type=int, default=0, help="Computing device.")
-    args = parser.parse_args()
-
-    # Read in data
-    ksp = np.load(args.ksp_file)
-    coord = np.load(args.coord_file)
-    dcf = np.load(args.dcf_file)
-
-    img = xdgrasp(
-        ksp,
-        coord,
-        dcf,
-        args.res_scale,
-        args.lambda_tv,
-        args.inner_iter,
-        args.outer_iter,
-        args.device,
-    )
-    print("writing data...")
-    # plt.ImagePlot(img)
-    cfl.write_cfl(args.img_file, img)

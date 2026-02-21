@@ -1,25 +1,35 @@
-import argparse
-import sigpy as sp
-import numpy as np
-import nibabel as nib
-from tqdm import trange
-import time
-import logging
 import copy
-import sigpy.plot as plt
+import logging
+import time
 
-# import matplotlib.pyplot as plt
+import numpy as np
+import sigpy as sp
+from tqdm import trange
 
 
 def gatingWeights(resp, gating_type="hard", percentile=25, decay=1, flip=False):
-    margin = 5  # Remove 5% at both ends to threshold robustly.
+    """Compute respiratory gating weights.
+
+    Reference: Section II-E of the JMRI paper.
+
+    Args:
+        resp (ndarray): Respiratory signal of length num_spokes.
+        gating_type (str): "hard" for binary gating, "soft" for exponential weighting.
+        percentile (float): Percentile threshold for gating (0-100).
+        decay (float): Exponential decay constant for soft gating.
+        flip (bool): If True, invert the respiratory signal.
+
+    Returns:
+        ndarray: Gating weights of length num_spokes. For hard gating, values
+            are 0 or 1. For soft gating, values are in (0, 1].
+    """
+    margin = 5
     sigma = 1.4628 * np.median(np.abs(resp - np.median(resp)))
     resp = -1 * (resp - np.median(resp)) / sigma
     thresh_extreme = [np.percentile(resp, margin), np.percentile(resp, 100 - margin)]
     idx = (resp >= thresh_extreme[0]) & (resp < thresh_extreme[1])
     idx_exclude = (resp < thresh_extreme[0]) & (resp >= thresh_extreme[1])
     resp_temp = resp[idx]
-    # Robust Threshold, exclude extreme values an
     thresh = np.percentile(resp_temp, percentile)
     if flip:
         resp *= -1
@@ -44,6 +54,27 @@ def gatedRecon(
     device=0,
     flip=False,
 ):
+    """Gated NUFFT reconstruction (no-gating, hard-gating, or soft-gating).
+
+    Performs a coil-by-coil NUFFT adjoint reconstruction with optional
+    respiratory gating.
+
+    Reference: Section II-E of the JMRI paper.
+
+    Args:
+        ksp_in (ndarray): K-space data of shape (C, num_spokes, num_ro).
+        coord_in (ndarray): Coordinates of shape (num_spokes, num_ro, D).
+        dcf_in (ndarray): Density compensation of shape (num_spokes, num_ro).
+        resp_in (ndarray): Respiratory signal of length num_spokes.
+        gating_type (str): "none", "hard", or "soft".
+        gating_thresh (float): Gating threshold percentile.
+        gating_weight (float): Exponential decay for soft gating.
+        device (int): Computing device (-1 for CPU, >=0 for GPU).
+        flip (bool): If True, invert the respiratory signal before gating.
+
+    Returns:
+        ndarray: Reconstructed 3D image.
+    """
     timeStart = time.time()
     sp.Device(device).use()
     xp = sp.Device(device).xp
@@ -52,7 +83,6 @@ def gatedRecon(
     else:
         logging.info("Using CPU...")
 
-    # Copy input data
     ksp = copy.deepcopy(ksp_in)
     coord = copy.deepcopy(coord_in)
     dcf = copy.deepcopy(dcf_in**2)
@@ -61,7 +91,6 @@ def gatedRecon(
     logging.info("Kspace Shape: {}...".format(ksp.shape))
     logging.info("trajectory Shape: {}...".format(coord.shape))
     logging.info("DCF Shape: {}....".format(dcf.shape))
-
     logging.info("Image Shape Estimate: {}".format(sp.estimate_shape(coord)))
     nCoils, nSpokes, nReadouts = ksp.shape
 
@@ -71,23 +100,14 @@ def gatedRecon(
             np.prod(img_shape) * ksp.itemsize // (1024 * 1024)
         )
     )
-
     logging.info("Running Gated Recon Type:{}".format(gating_type))
 
-    # Respiratory Gating
     if gating_type == "none":
         pass
     elif gating_type == "hard":
         W = gatingWeights(
-            resp,
-            gating_type="hard",
-            percentile=gating_thresh,
-            decay=gating_weight,
-            flip=flip,
+            resp, gating_type="hard", percentile=gating_thresh, decay=gating_weight, flip=flip,
         )
-        # plt.plot(resp)
-        # plt.plot(W * resp)
-        # plt.show()
         idx = W == 1
         ksp = ksp[:, idx]
         coord = coord[idx]
@@ -95,20 +115,14 @@ def gatedRecon(
         del W, idx
     elif gating_type == "soft":
         W = gatingWeights(
-            resp,
-            gating_type="soft",
-            percentile=gating_thresh,
-            decay=gating_weight,
-            flip=flip,
+            resp, gating_type="soft", percentile=gating_thresh, decay=gating_weight, flip=flip,
         )
         W_correct = np.broadcast_to(W[..., None], W.shape + (ksp.shape[2],))
         dcf = dcf * W_correct
         del W, W_correct
-
     else:
         raise ValueError("Unknown Gating Type.")
 
-    # Reconstruction
     pbarOuter = trange(nCoils, leave=True, ncols=80)
     coord = sp.to_device(coord, device)
     ksp = ksp * dcf
@@ -129,53 +143,3 @@ def gatedRecon(
     img = np.transpose(img, (2, 1, 0))
     img = np.flip(img, (0, 1, 2))
     return img
-
-
-if __name__ == "__main__":
-    # IO parameters
-    parser = argparse.ArgumentParser(description="Gated recon.")
-    parser.add_argument("ksp_file", type=str, help="k-space file.")
-    parser.add_argument("coord_file", type=str, help="trajectory file.")
-    parser.add_argument("dcf_file", type=str, help="dcf file.")
-    parser.add_argument("resp_file", type=str, help="resp. waveform file.")
-    parser.add_argument("img_file", type=str, help="img out filepath.")
-    parser.add_argument("--device", type=int, default=-1, help="Computing device.")
-    parser.add_argument(
-        "--gating_type",
-        type=str,
-        default="none",
-        help="Gating Type. Options are 'none', 'hard','soft'",
-    )
-    parser.add_argument(
-        "--gating_thresh",
-        type=float,
-        default=50,
-        help="Gating Threshold. Options range from 0.0 to 1.0",
-    )
-    parser.add_argument(
-        "--gating_weight",
-        type=float,
-        default=1.0,
-        help="Gating weight decay for soft threshold.",
-    )
-    args = parser.parse_args()
-
-    # Read in data
-    ksp = np.load(args.ksp_file)
-    coord = np.load(args.coord_file)
-    dcf = np.load(args.dcf_file)
-    resp = np.load(args.resp_file)
-    img = gatedRecon(
-        ksp,
-        coord,
-        dcf,
-        resp,
-        gating_type=args.gating_type,
-        gating_thresh=args.gating_thresh,
-        gating_weight=args.gating_weight,
-        device=args.device,
-    )
-    print("writing data...")
-    img = sp.resize(np.abs(img), (256, 256, 256))
-    img = nib.Nifti1Image(img, np.eye(4))
-    nib.save(img, args.img_file)
