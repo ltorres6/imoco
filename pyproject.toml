@@ -1,31 +1,30 @@
-[tool.poetry]
+[project]
 name = "imoco"
 version = "0.1.0"
 description = "Iterative Motion Compensation (iMoCo) for pulmonary UTE MRI reconstruction"
-authors = ["Luis Torres <luigibytes@gmail.com>"]
+authors = [{ name = "Luis Torres", email = "luigibytes@gmail.com" }]
 readme = "README.md"
 license = "BSD-3-Clause"
-packages = [{include = "imoco"}]
+requires-python = ">=3.9,<3.12"
+dependencies = [
+    "cupy-cuda12x>=13.6.0,<14",
+    "h5py>=3.14.0",
+    "matplotlib>=3.9.4",
+    "nibabel>=5.3.3",
+    "numpy>=2.0.2",
+    "pandas>=2.3.3",
+    "pyyaml>=6.0.3",
+    "scikit-image>=0.24.0",
+    "scipy>=1.13.1",
+    "sigpy>=0.1.27",
+    "simpleitk>=2.5.3",
+    "torch>=2.8.0",
+    "tqdm>=4.67.3",
+]
 
-[tool.poetry.dependencies]
-python = ">=3.9,<3.12"
-numpy = ">=1.23"
-matplotlib = ">=3.6"
-nibabel = ">=4.0"
-h5py = ">=3.7"
-sigpy = ">=0.1.23"
-scikit-image = ">=0.19"
-pandas = ">=1.5"
-torch = ">=1.12"
-simpleitk = ">=2.2"
-scipy = ">=1.9"
-Pillow = ">=9.0"
-tqdm = ">=4.0"
-pyyaml = ">=6.0"
-
-[tool.poetry.scripts]
+[project.scripts]
 imoco = "imoco.pipeline:main"
 
 [build-system]
-requires = ["poetry-core"]
-build-backend = "poetry.core.masonry.api"
+requires = ["hatchling"]
+build-backend = "hatchling.build"

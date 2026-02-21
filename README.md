@@ -40,43 +40,61 @@ Additionally, the following experimental methods (not described in the paper) ar
 
 ### Prerequisites
 
-- [Conda](https://docs.conda.io/) environment manager
-- [Poetry](https://python-poetry.org/) dependency manager
-- [ANTs](https://github.com/ANTsX/ANTs) (for the default registration backend)
+- Python 3.9--3.11
+- [uv](https://docs.astral.sh/uv/) package manager
+- [ANTs](https://github.com/ANTsX/ANTs) (required for iMoCo and MoCo registration)
 
-### Steps
+### Install the package
 
 ```bash
-# 1. Create and activate a conda environment
-conda create -n imoco python=3.9
-conda activate imoco
+uv sync
+```
 
-# 2. Install the package
-poetry install
+### Install ANTs
 
-# 3. Install CuPy for GPU acceleration
-conda install -c conda-forge cupy cudnn
+The default iMoCo and MoCo pipelines call `antsRegistration` from the command line, so it must be on your `PATH`. The AirLab-based variants (`imoco_airlab`, `moco_airlab`) do not require ANTs.
 
-# 4. (Optional) Install ANTs
-#    Follow instructions at: https://github.com/ANTsX/ANTs
-#    Ensure antsRegistration is on your PATH
+**Option A -- conda-forge (easiest):**
+
+```bash
+conda install -c conda-forge ants
+```
+
+**Option B -- pre-built binaries:**
+
+Download a release from [ANTsX/ANTs releases](https://github.com/ANTsX/ANTs/releases), extract it, and add the `bin/` directory to your `PATH`:
+
+```bash
+export ANTSPATH=/path/to/ants/bin
+export PATH=$ANTSPATH:$PATH
+```
+
+**Option C -- build from source:**
+
+Follow the [ANTs build instructions](https://github.com/ANTsX/ANTs/wiki/Compiling-ANTs-on-Linux-and-Mac-OS).
+
+**Verify** that ANTs is installed:
+
+```bash
+antsRegistration --version
 ```
 
 ## Usage
 
-### YAML Configuration
-
-The pipeline is driven by a single YAML configuration file that specifies paths, reconstruction parameters, and pipeline flags. See [`examples/example_config.yaml`](examples/example_config.yaml) for all available options.
-
 ### CLI
 
 ```bash
+# Run with just a data directory (uses default parameters, output goes to raw_dir/output/)
+uv run imoco --raw_dir /data/subject01
+
 # Run with a config file
-imoco examples/example_config.yaml
+uv run imoco config.yaml
 
 # Override paths from the command line
-imoco config.yaml --raw_dir /data/subject01 --out_dir /output/subject01
+uv run imoco config.yaml --raw_dir /data/subject01 --out_dir /output/subject01
 ```
+
+See [`examples/example_config.yaml`](examples/example_config.yaml) for all available configuration options.
 
 ### Python API
 

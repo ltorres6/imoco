@@ -1,0 +1,4 @@
+raw_dir: ~/data/103-035/mri/20180424/pre_contrast
+out_dir: ~/data/103-035/mri/20180424/pre_contrast/output
+overwrite_raw: false
+subject_id: "103-035"

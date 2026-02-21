@@ -6,7 +6,10 @@ import sys
 import time
 from pathlib import Path
 
-import cupy as cp
+try:
+    import cupy as cp
+except ImportError:
+    cp = None
 import matplotlib.pyplot as plt
 import nibabel as nib
 import numpy as np
@@ -46,14 +49,14 @@ DEFAULT_CONFIG = {
     "do_MoCoExp": False,
     "do_gridded_motion_resolved": True,
     # Overwrite flags
-    "overwrite_raw": True,
+    "overwrite_raw": False,
     "overwrite_recons": False,
     # Reconstruction parameters
     "n_bins": 6,
     "max_coils": 8,
     "device": 0,
     "iterations": 20,
-    "final_matrix_size": [256, 256, 256],
+    "final_matrix_size": (256, 256, 256),
     "resolution": [1.25, 1.25, 1.25],
     # Algorithm parameters
     "hardgating_weights": [50],
@@ -550,7 +553,8 @@ def run(cfg):
                 if UID_base:
                     writeDicoms(mrimg_expPath, dicomDir, UID_base=UID_base, subject_id=subject_id, series_num=series_nums[4])
                 del mrimg, mrimg_exp
-                cp._default_memory_pool.free_all_blocks()
+                if cp is not None:
+                    cp._default_memory_pool.free_all_blocks()
 
         del ksp, coord, dcf
 
@@ -595,24 +599,29 @@ def main():
     parser = argparse.ArgumentParser(
         description="iMoCo: Iterative Motion Compensation for pulmonary UTE MRI"
     )
-    parser.add_argument("config", type=str, help="Path to YAML configuration file")
-    parser.add_argument("--raw_dir", type=str, default=None, help="Override raw data directory")
-    parser.add_argument("--out_dir", type=str, default=None, help="Override output directory")
+    parser.add_argument("config", type=str, nargs="?", default=None, help="Path to YAML configuration file")
+    parser.add_argument("--raw_dir", type=str, default=None, help="Raw data directory")
+    parser.add_argument("--out_dir", type=str, default=None, help="Output directory")
     parser.add_argument("--postfix", type=str, default=None, help="Override postfix string")
     args = parser.parse_args()
 
-    cfg = load_config(args.config)
+    if args.config:
+        cfg = load_config(args.config)
+    else:
+        cfg = dict(DEFAULT_CONFIG)
 
     # CLI overrides
     if args.raw_dir:
         cfg["raw_dir"] = args.raw_dir
     if args.out_dir:
         cfg["out_dir"] = args.out_dir
+    elif not cfg["out_dir"] and cfg["raw_dir"]:
+        cfg["out_dir"] = os.path.join(cfg["raw_dir"], "output")
     if args.postfix is not None:
         cfg["postfix"] = args.postfix
 
     if not cfg["raw_dir"] or not cfg["out_dir"]:
-        parser.error("raw_dir and out_dir must be specified (in YAML or via CLI)")
+        parser.error("raw_dir must be specified (in YAML or via --raw_dir)")
 
     Path(os.path.join(cfg["out_dir"], f"diagnostics{cfg['postfix']}")).mkdir(parents=True, exist_ok=True)
     logging.basicConfig(
