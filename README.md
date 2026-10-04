@@ -9,26 +9,39 @@ This repository implements a suite of retrospective motion compensation techniqu
 
 ## Citation
 
-If you use this software, please cite the associated manuscript (details forthcoming):
+If you use this software, please cite both the paper that describes this implementation and the original iMoCo work:
 
-> [Author(s) TBD]. "[Title TBD]." *[Journal TBD]*, forthcoming.
+> Kizhakke Puliyakote AS, Torres LA, AlAtoum A, AlArab N, Johnson KM, Bello RM, O'Sullivan-Murphy B, Mammarappallil JG, Hahn AD, Fain SB. "Comparison of Retrospective Motion Compensation Techniques for Pulmonary Dynamic Ultrashort Time to Echo MRI in Suspected Idiopathic Pulmonary Fibrosis." *Journal of Magnetic Resonance Imaging*. 2026;64(3):644–654. doi:[10.1002/jmri.70350](https://doi.org/10.1002/jmri.70350)
 
-<!--
-Update the citation block and BibTeX entry below once the manuscript is published.
--->
+> Zhu X, Chan M, Lustig M, Johnson KM, Larson PEZ. "Iterative motion-compensation reconstruction ultra-short TE (iMoCo UTE) for high-resolution free-breathing pulmonary MRI." *Magnetic Resonance in Medicine*. 2020;83(4):1208–1221. doi:[10.1002/mrm.27998](https://doi.org/10.1002/mrm.27998)
 
 ```bibtex
-@article{imoco,
-  title={TBD},
-  author={TBD},
-  journal={TBD},
-  year={TBD}
+@article{kizhakkepuliyakote2026motion,
+  title   = {Comparison of Retrospective Motion Compensation Techniques for Pulmonary Dynamic Ultrashort Time to Echo {MRI} in Suspected Idiopathic Pulmonary Fibrosis},
+  author  = {Kizhakke Puliyakote, Abhilash S. and Torres, Luis A. and AlAtoum, Aiah and AlArab, Natally and Johnson, Kevin M. and Bello, Rodrigo M. and O'Sullivan-Murphy, Bryan and Mammarappallil, Joseph G. and Hahn, Andrew D. and Fain, Sean B.},
+  journal = {Journal of Magnetic Resonance Imaging},
+  volume  = {64},
+  number  = {3},
+  pages   = {644--654},
+  year    = {2026},
+  doi     = {10.1002/jmri.70350}
+}
+
+@article{zhu2020imoco,
+  title   = {Iterative motion-compensation reconstruction ultra-short {TE} ({iMoCo} {UTE}) for high-resolution free-breathing pulmonary {MRI}},
+  author  = {Zhu, Xucheng and Chan, Marilynn and Lustig, Michael and Johnson, Kevin M. and Larson, Peder E. Z.},
+  journal = {Magnetic Resonance in Medicine},
+  volume  = {83},
+  number  = {4},
+  pages   = {1208--1221},
+  year    = {2020},
+  doi     = {10.1002/mrm.27998}
 }
 ```
 
 ## Reconstruction Methods
 
-The following methods from the paper are implemented:
+The following methods from the [JMRI paper](https://doi.org/10.1002/jmri.70350) are implemented:
 
 1. **No Gating** -- NUFFT adjoint using all acquired spokes
 2. **Hard Gating** -- Binary selection of spokes near end-expiration
